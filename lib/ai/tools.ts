@@ -1,4 +1,5 @@
 import { type ToolSet } from "ai";
+import { calculateDeal, checkDiscountAuthority } from "@/app/api/chat/tools/deal-tools";
 import { createWebSearch } from "@/app/api/chat/tools/web-search";
 import { createFetchOwnerProfiles } from "@/app/api/chat/tools/fetch-owner-profiles";
 import { createVectorDatabaseSearch } from "@/app/api/chat/tools/search-vector-database";
@@ -28,6 +29,8 @@ export type CollectSource = (s: UISource, content?: string) => void;
  */
 export function buildToolSet(collect: CollectSource = () => {}): ToolSet {
   return {
+    calculateDeal,
+    checkDiscountAuthority,
     ...(ENABLE_VECTOR_SEARCH ? { vectorDatabaseSearch: createVectorDatabaseSearch(collect) } : {}),
     ...(ENABLE_WEB_SEARCH
       ? {
@@ -41,7 +44,28 @@ export function buildToolSet(collect: CollectSource = () => {}): ToolSet {
 }
 
 export function buildToolGuidance(): string {
-  const sections: string[] = [];
+  const sections: string[] = [
+    `GOVERNANCE TOOLS GUIDANCE:
+- checkDiscountAuthority:
+  * MUST be called for ANY authorization or decision-rights determination.
+  * Evaluates policy thresholds deterministically:
+    - <= 10%: AUTO_APPROVED (AI Delegated Authority)
+    - > 10% and <= 20%: SALES_MANAGER_APPROVAL_REQUIRED (Sales Manager approval required)
+    - > 20% and <= 30%: FINANCE_APPROVAL_REQUIRED (Finance approval required)
+    - > 30%: BLOCKED (Cannot be approved through normal workflow)
+  * CRITICAL: The model must NEVER independently determine authorization or invent approval.
+  * Note on AUTO_APPROVED: Indicates the proposed discount is within the AI's explicitly delegated authority under current policy. It does NOT mean a proposal has actually been sent or released.
+
+- calculateDeal:
+  * MUST be called for ANY monetary deal calculations (list value, discount amount, final deal value).
+  * CRITICAL: The model must NEVER perform authoritative monetary calculations or mental math internally.
+
+- TOOL USAGE RULES:
+  * Do NOT require both tools on every conversation.
+  * For authorization questions without complete quantity/unit price, use checkDiscountAuthority alone.
+  * When full deal details (quantity, unit price, discount) are provided, use calculateDeal for the figures and checkDiscountAuthority for the approval rights.
+  * Always relay tool outputs accurately without hallucinating or overriding results.`
+  ];
 
   if (ENABLE_VECTOR_SEARCH) {
     sections.push(
@@ -68,19 +92,12 @@ CITATIONS:
 - Cite each fact to the source it ACTUALLY came from. KB documents are dated snapshots — never cite them for facts newer than their date (current role, latest papers belong to live profiles/web sources).
 - Do NOT write a References or Sources section — the app renders a Sources box automatically from your inline citations.`
     );
-  } else {
-    // Knowledge base disabled — override the KB-first instructions in the system prompt
+  } else if (ENABLE_WEB_SEARCH) {
     sections.push(
-      `NOTE: The knowledge base is currently UNAVAILABLE. Ignore any instructions to search it.
-Answer from your general knowledge.`
-    );
-    if (ENABLE_WEB_SEARCH) {
-      sections.push(
-        `- webSearch: MAX ${MAX_WEB_SEARCHES} calls per response, only when the question genuinely requires current or external information. Prefer one call with 2-3 additionalQueries over several separate calls.
+      `- webSearch: MAX ${MAX_WEB_SEARCHES} calls per response, only when the question genuinely requires current or external information. Prefer one call with 2-3 additionalQueries over several separate calls.
 - Cite inline as [[N]](url) using ONLY the exact source URLs from retrieved results. NEVER fabricate or guess URLs. Attribute each claim to the exact result it came from. Every sentence must read completely with citations removed.
 - Do NOT write a References or Sources section — the app renders a Sources box automatically from your inline citations.`
-      );
-    }
+    );
   }
 
   sections.push(

@@ -11,11 +11,10 @@ import { QuickOptions } from "./quick-options";
 import type { UISource } from "@/types/data";
 import { AssemblingIndicator } from "../ai-elements/assembling-indicator";
 import { ProcessingIndicator } from "../ai-elements/processing-indicator";
-import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { ThumbsUp, ThumbsDown, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { saveFeedback, loadFeedback } from "@/lib/storage";
-import { Bike } from "lucide-react";
 
 function FeedbackButtons({ messageId, conversationId }: { messageId: string; conversationId?: string }) {
   const [rating, setRating] = useState<"up" | "down" | null>(() => {
@@ -135,7 +134,7 @@ export function AssistantMessage({
   return (
     <div className="w-full flex gap-3">
       <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-        <Bike className="size-4" />
+        <ShieldCheck className="size-4" />
       </div>
       <div className="flex-1 min-w-0">
       <div className="text-sm flex flex-col gap-4">

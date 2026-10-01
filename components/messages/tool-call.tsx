@@ -1,7 +1,7 @@
 "use client";
 
 import { ToolCallPart, ToolResultPart } from "ai";
-import { BookOpen, Globe, Search, Wrench } from "lucide-react";
+import { BookOpen, Calculator, Globe, ShieldCheck, Wrench } from "lucide-react";
 import { Shimmer } from "../ai-elements/shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
 import { pickRandomPastTense, type FunLabelCategory } from "@/lib/fun-labels";
@@ -27,7 +27,51 @@ function formatSearchArgs(_: string, input: unknown): string {
   }
 }
 
+function formatCalculateDealArgs(_: string, input: unknown): string {
+  try {
+    if (typeof input !== "object" || input === null) return "";
+    const args = input as Record<string, unknown>;
+    const q = args.quantity;
+    const p = args.unitPrice;
+    const d = args.requestedDiscountPercent;
+    if (q !== undefined && p !== undefined && d !== undefined) {
+      return `${q} units @ ₹${Number(p).toLocaleString("en-IN")} (${d}% off)`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function formatAuthorityArgs(_: string, input: unknown): string {
+  try {
+    if (typeof input !== "object" || input === null) return "";
+    const args = input as Record<string, unknown>;
+    const d = args.requestedDiscountPercent;
+    if (d !== undefined) {
+      return `Discount: ${d}%`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 const TOOL_CONFIG: Record<string, ToolDisplayConfig> = {
+  calculateDeal: {
+    callCategory: "processing",
+    resultCategory: "processing",
+    call_icon: <Calculator className="w-4 h-4" />,
+    result_icon: <Calculator className="w-4 h-4" />,
+    formatArgs: formatCalculateDealArgs,
+  },
+  checkDiscountAuthority: {
+    callCategory: "processing",
+    resultCategory: "processing",
+    call_icon: <ShieldCheck className="w-4 h-4" />,
+    result_icon: <ShieldCheck className="w-4 h-4" />,
+    formatArgs: formatAuthorityArgs,
+  },
   webSearch: {
     callCategory: "webSearch",
     resultCategory: "webSearch",

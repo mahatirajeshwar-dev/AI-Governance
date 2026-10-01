@@ -20,17 +20,17 @@ function getDateAndTime(): string {
 export const DATE_AND_TIME = getDateAndTime();
 
 // --- Assistant identity (all user-facing naming derives from these) ---
-export const AI_NAME = "RideWise"; // ← your assistant's name (rename freely)
-export const OWNER_NAME = "our showroom"; // ← the dealership/brand this assistant represents
+export const AI_NAME = "Discount Approval Guardian"; // ← your assistant's name (rename freely)
+export const OWNER_NAME = "Commercial Governance"; // ← the organization/function this assistant represents
 export const AI_DESCRIPTION = `
-${AI_NAME} is a bike-buying advisor for customers shopping for a motorcycle or scooter in India. It has a conversational, showroom-salesperson style: it asks a few easy, non-technical questions to understand what a customer actually needs, then recommends a shortlist of models using the indexed bike knowledge base plus live web information.
+${AI_NAME} is an AI governance agent that sits between sales teams and customer-facing proposals. It enforces corporate discount decision-rights policies, calculates deal economics deterministically, and identifies the exact approval authority required before proposals can be released.
 `.trim();
 
 // Browser tab / metadata title. Change freely — one line, no other edits needed.
 export const BROWSER_TAB_TITLE = `${AI_NAME}`;
 
-export const WELCOME_MESSAGE = `Hi, I'm ${AI_NAME}! Looking for your next bike? Tell me a bit about how you'll ride, and I'll help you find the right ones.`;
-export const CLEAR_CHAT_TEXT = "New";
+export const WELCOME_MESSAGE = `Welcome to ${AI_NAME}. I verify commercial deal economics and enforce corporate discount decision-rights policies. Share your deal details (customer name, quantity, unit price, and requested discount) to evaluate authorization.`;
+export const CLEAR_CHAT_TEXT = "New Deal";
 
 // --- Defaults (PROF REQUIREMENT: Anthropic by default) ---
 export const DEFAULT_VENDOR = "anthropic" as const;
@@ -101,16 +101,11 @@ export const PINECONE_VISUALS_PER_SOURCE = 20; // max figure/table chunks merged
 // Update this list whenever you ingest new content into Pinecone.
 // The model uses this to decide whether to search the KB or skip it entirely.
 export const KB_SCOPE = `
-The knowledge base covers motorcycles and scooters sold in India. Topics include:
-
-DOCUMENTS AND TOPICS (update this as you ingest real content):
-- Model specification sheets: engine, mileage, weight, seat height, ground clearance, fuel tank, features
-- Variant and colour options, and on-road/ex-showroom price ranges by city
-- Segment/use-case fit: daily commuting, long-distance touring, off-road, sporty/performance, city scooters
-- Owner and expert reviews, common pros/cons, reliability and service-cost notes
-- Comparison notes between competing models (e.g. same segment, similar price band)
-
-Any question about buying, comparing, or choosing a two-wheeler in India is within scope.
+The governance policy covers commercial discount decision rights:
+- Discount <= 10%: AI Delegated Authority (auto-approved under prototype policy).
+- Discount > 10% and <= 20%: Sales Manager approval required.
+- Discount > 20% and <= 30%: Finance approval required.
+- Discount > 30%: Blocked (cannot be approved through normal workflow).
 `.trim();
 
 // --- Exa Web Search ---
@@ -120,7 +115,7 @@ export const EXA_MAX_CHARACTERS = 3000; // max chars of page text per result
 // "preferred" makes Exa fetch live page content when possible, reducing the odds
 // that stale or deleted pages (e.g. dead university URLs) surface in results.
 export const EXA_LIVECRAWL = "preferred" as const; // "never" | "fallback" | "preferred" | "always"
-export const EXA_SYSTEM_PROMPT = `Prefer authoritative, India-specific sources on motorcycles and scooters: official manufacturer sites (Hero MotoCorp, Honda, Bajaj, TVS, Royal Enfield, Yamaha, Suzuki, KTM, Ola, Ather, etc.), and reputable automotive outlets such as BikeDekho, ZigWheels, Autocar India, and Team-BHP for real owner reviews. Prefer current-year pricing and availability pages. Avoid duplicates, low-quality aggregators, and pages that appear outdated or discontinued.`;
+export const EXA_SYSTEM_PROMPT = `Prefer authoritative sources on commercial pricing, market rates, and corporate discounting norms. Avoid duplicates, low-quality aggregators, and pages that appear outdated.`;
 
 // --- Owner Profile Sources ---
 // Not used by this assistant (there is no single "owner" persona to fetch
@@ -226,13 +221,12 @@ export type ReasoningDisplayMode = "full" | "truncated" | "hidden";
 export const REASONING_DISPLAY_MODE: ReasoningDisplayMode = "truncated";
 export const REASONING_TRUNCATE_WORDS = 15; // words to show in "truncated" mode
 
-// --- Backend toggles (enabled by default) ---
-// Disable web search by setting the env var: ENABLE_WEB_SEARCH=false
+// --- Backend toggles (disabled by default for Phase 1 Guardian governance) ---
+// Enable web search by setting the env var: ENABLE_WEB_SEARCH=true
 export const ENABLE_WEB_SEARCH =
-  process.env.ENABLE_WEB_SEARCH?.toLowerCase() !== "false";
+  process.env.ENABLE_WEB_SEARCH?.toLowerCase() === "true";
 
-// Disable the Pinecone knowledge base by setting the env var: ENABLE_VECTOR_SEARCH=false
-// When off: the KB tool is removed from the model, no Pinecone connection is made,
-// and PINECONE_API_KEY is not needed. The bot answers from general knowledge (+ web search if enabled). 
+// Enable the Pinecone knowledge base by setting the env var: ENABLE_VECTOR_SEARCH=true
+// Kept disabled for Phase 1 without deleting infrastructure.
 export const ENABLE_VECTOR_SEARCH =
-  process.env.ENABLE_VECTOR_SEARCH?.toLowerCase() !== "false";
+  process.env.ENABLE_VECTOR_SEARCH?.toLowerCase() === "true";

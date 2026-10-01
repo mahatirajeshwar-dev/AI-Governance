@@ -26,6 +26,10 @@ export const FUN_LABELS = {
     "Transforming",
     "Extracting",
     "Filtering",
+    "Evaluating policy",
+    "Checking discount authority",
+    "Calculating deal terms",
+    "Validating decision rights",
   ],
   knowledgeBase: [
     "Retrieving",
@@ -100,8 +104,11 @@ export const PAST_TENSE: Record<FunLabelCategory, string[]> = {
     "Correlated findings",
     "Transformed data",
     "Extracted insights",
-    "Filtered information"
-
+    "Filtered information",
+    "Evaluated discount authority",
+    "Calculated deal terms",
+    "Validated decision rights",
+    "Checked governance policy",
   ],
   knowledgeBase: [
     "Retrieved knowledge",
