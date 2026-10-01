@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { pickRandom, type FunLabelCategory } from "@/lib/fun-labels";
+import { pickRandom, pickStable, type FunLabelCategory } from "@/lib/fun-labels";
 
 /**
  * Returns a label that rotates through fun words from the given category.
@@ -11,7 +11,7 @@ export function useRotatingLabel(
   category: FunLabelCategory,
   intervalMs = 3000
 ): string {
-  const [label, setLabel] = useState(() => pickRandom(category));
+  const [label, setLabel] = useState(() => pickStable(category, 0));
   const labelRef = useRef(label);
 
   useEffect(() => {

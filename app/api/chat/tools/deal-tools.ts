@@ -81,7 +81,7 @@ export function evaluateDiscountAuthority(
       status: "AUTO_APPROVED",
       authorityLevel: "AI Delegated Authority",
       reason:
-        "Discounts up to 10% fall within AI delegated authority under current prototype policy.",
+        "Discounts up to 10% fall within AI delegated authority under the current discount policy.",
       withinDelegatedAuthority: true,
     };
   }

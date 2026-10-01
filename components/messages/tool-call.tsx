@@ -4,7 +4,7 @@ import { ToolCallPart, ToolResultPart } from "ai";
 import { BookOpen, Calculator, Globe, ShieldCheck, Wrench } from "lucide-react";
 import { Shimmer } from "../ai-elements/shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
-import { pickRandomPastTense, type FunLabelCategory } from "@/lib/fun-labels";
+import { pickStablePastTense, type FunLabelCategory } from "@/lib/fun-labels";
 import { useMemo } from "react";
 
 // ---- Tool display config ----
@@ -173,7 +173,7 @@ export function ToolResult({ part }: { part: ToolResultPart }) {
 
   // Pick a random past-tense label once on mount
   const resultLabel = useMemo(
-    () => pickRandomPastTense(config.resultCategory),
+    () => pickStablePastTense(config.resultCategory, 0),
     [config.resultCategory]
   );
 

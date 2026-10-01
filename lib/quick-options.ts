@@ -28,7 +28,7 @@ export function extractQuickOptions(text: string): {
   const options = match[1]
     .split("\n")
     .map((line) => line.replace(/^[ \t]*-[ \t]*/, "").trim())
-    .filter(Boolean)
+    .filter((option) => /[a-z0-9]/i.test(option))
     .slice(0, 6);
 
   if (options.length === 0) {

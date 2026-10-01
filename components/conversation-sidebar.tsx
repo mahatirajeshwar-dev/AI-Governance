@@ -1,92 +1,115 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Conversation,
-  listConversations,
-  deleteConversation,
-} from "@/lib/storage";
-import { MessageSquare, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { type Deal } from "@/lib/deals";
+import { BriefcaseBusiness, Plus, ShieldCheck } from "lucide-react";
 
 export function ConversationSidebar({
-  activeId,
-  onSelect,
-  onNew,
+  deals,
+  activeDealId,
+  onSelectDeal,
+  onNewDeal,
   onClose,
 }: {
-  activeId: string | null;
-  onSelect: (id: string) => void;
-  onNew: () => void;
+  deals: Deal[];
+  activeDealId: string | null;
+  onSelectDeal: (id: string) => void;
+  onNewDeal: () => void;
   onClose: () => void;
 }) {
-  const [conversations, setConversations] = useState<Conversation[]>(() =>
-    listConversations()
-  );
-  const [showSummary, setShowSummary] = useState(false);
-
-  function refresh() {
-    setConversations(listConversations());
-  }
-
-  function handleDelete(id: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    deleteConversation(id);
-    const updated = listConversations();
-    setConversations(updated);
-    if (id === activeId) onNew();
-  }
-
-  function handleNew() {
-    onNew();
-    setShowSummary(false);
-    setTimeout(() => setConversations(listConversations()), 0);
-  }
-
-
   return (
     <div className="flex h-full w-64 flex-col border-r bg-background">
-      <div className="flex items-center justify-between p-3 pt-4 border-b">
-        <span className="text-sm font-medium">Chats</span>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNew} aria-label="New chat">
-          <Plus className="size-4" />
+      <div className="border-b p-3 pt-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Workspace</p>
+          <span className="text-sm font-semibold">Deals</span>
+        </div>
+        <Button variant="outline" size="sm" className="mt-3 w-full justify-start" onClick={onNewDeal} aria-label="New deal">
+          <Plus className="size-4" /> New Deal
         </Button>
       </div>
 
+      <div className="border-b px-3 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Active deals</p>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-2">
-        {conversations.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4">
-            No conversations yet
-          </p>
+        {deals.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">No deals yet</p>
         ) : (
-          <div className="flex flex-col gap-1">
-            {conversations.map((conv) => (
-              <button
-                key={conv.id}
-                onClick={() => { onSelect(conv.id); setShowSummary(false); }}
-                className={cn(
-                  "group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm w-full hover:bg-muted transition-colors",
-                  activeId === conv.id && "bg-muted"
-                )}
-              >
-                <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate flex-1">{conv.title}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0"
-                  onClick={(e) => handleDelete(conv.id, e)}
-                  aria-label="Delete conversation"
+          <div className="flex flex-col gap-1.5">
+            {deals.map((deal) => {
+              const isReviewing = deal.workflowPhase === "sales-agent" || deal.workflowPhase === "handoff" || deal.workflowPhase === "dealguard-review";
+              const dealTone = isReviewing
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                :
+                deal.governanceDecision.proposalState === "BLOCKED"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : deal.governanceDecision.proposalState === "REJECTED"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                  : deal.governanceDecision.proposalState === "AUTHORIZED"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : deal.governanceDecision.authorityStatus === "FINANCE_APPROVAL_REQUIRED"
+                      ? "border-violet-200 bg-violet-50 text-violet-800"
+                    : deal.governanceDecision.proposalState === "HELD"
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600";
+
+              return (
+                <button
+                  key={deal.id}
+                  onClick={() => {
+                    onSelectDeal(deal.id);
+                    onClose();
+                  }}
+                  className={cn(
+                    "group flex w-full items-start gap-2 rounded-lg border p-2 text-left transition-colors hover:bg-slate-50",
+                    activeDealId === deal.id && "border-slate-300 bg-slate-100/80"
+                  )}
                 >
-                  <Trash2 className="size-3 text-muted-foreground" />
-                </Button>
-              </button>
-            ))}
+                  <div className="mt-0.5 flex size-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                    <BriefcaseBusiness className="size-3.5" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-slate-900">{deal.customerName}</span>
+                      <span className={cn("rounded-full border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em]", dealTone)}>
+                        {isReviewing
+                          ? "reviewing"
+                          : deal.governanceDecision.proposalState === "AUTHORIZED"
+                          ? "ok"
+                          : deal.governanceDecision.proposalState === "BLOCKED"
+                            ? "blocked"
+                            : deal.governanceDecision.proposalState === "REJECTED"
+                              ? "rejected"
+                            : deal.governanceDecision.proposalState === "HELD"
+                              ? "held"
+                              : "new"}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                      {isReviewing
+                        ? `${deal.proposedDiscount ?? ""}% · REVIEWING`
+                        : deal.proposedDiscount !== null
+                        ? `${deal.proposedDiscount}% · ${deal.governanceDecision.status}`
+                        : deal.governanceDecision.status}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
+      <div className="border-t p-3">
+        <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+          <ShieldCheck className="size-3.5 text-emerald-600" />
+          DealGuard review
+        </div>
+      </div>
     </div>
   );
 }

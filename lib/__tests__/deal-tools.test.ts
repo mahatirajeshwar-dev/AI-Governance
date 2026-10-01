@@ -7,6 +7,13 @@ import {
   type DiscountAuthorityResult,
   type DealCalculationResult,
 } from "@/app/api/chat/tools/deal-tools";
+import {
+  getAuthorityBand,
+  isApprovalRequired,
+  isProposalReleasable,
+  getProposalOutcome,
+  ProposalState,
+} from "@/lib/governance";
 
 describe("Deterministic Discount Authority Decision Rights", () => {
   describe("Exact Boundary Conditions", () => {
@@ -188,5 +195,34 @@ describe("AI SDK Tool Execution", () => {
     )) as unknown as DealCalculationResult;
     expect(result.success).toBe(true);
     expect(result.dealValue).toBe(375000);
+  });
+});
+
+describe("Shared DealGuard governance helper", () => {
+  it("maps each boundary to the correct authority band", () => {
+    expect(getAuthorityBand(7).status).toBe("AUTO_APPROVED");
+    expect(getAuthorityBand(10).status).toBe("AUTO_APPROVED");
+    expect(getAuthorityBand(17).status).toBe("SALES_MANAGER_APPROVAL_REQUIRED");
+    expect(getAuthorityBand(20).status).toBe("SALES_MANAGER_APPROVAL_REQUIRED");
+    expect(getAuthorityBand(25).status).toBe("FINANCE_APPROVAL_REQUIRED");
+    expect(getAuthorityBand(30).status).toBe("FINANCE_APPROVAL_REQUIRED");
+    expect(getAuthorityBand(35).status).toBe("BLOCKED");
+  });
+
+  it("tracks approval and releasability transitions deterministically", () => {
+    expect(isApprovalRequired("AUTO_APPROVED")).toBe(false);
+    expect(isApprovalRequired("SALES_MANAGER_APPROVAL_REQUIRED")).toBe(true);
+    expect(isApprovalRequired("FINANCE_APPROVAL_REQUIRED")).toBe(true);
+    expect(isApprovalRequired("BLOCKED")).toBe(false);
+
+    expect(isProposalReleasable("AUTO_APPROVED")).toBe(true);
+    expect(isProposalReleasable("SALES_MANAGER_APPROVAL_REQUIRED")).toBe(false);
+    expect(isProposalReleasable("FINANCE_APPROVAL_REQUIRED")).toBe(false);
+    expect(isProposalReleasable("BLOCKED")).toBe(false);
+
+    expect(getProposalOutcome("AUTO_APPROVED")).toBe(ProposalState.AUTHORIZED);
+    expect(getProposalOutcome("SALES_MANAGER_APPROVAL_REQUIRED")).toBe(ProposalState.HELD);
+    expect(getProposalOutcome("FINANCE_APPROVAL_REQUIRED")).toBe(ProposalState.HELD);
+    expect(getProposalOutcome("BLOCKED")).toBe(ProposalState.BLOCKED);
   });
 });

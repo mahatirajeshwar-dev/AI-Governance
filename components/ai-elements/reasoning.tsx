@@ -14,7 +14,7 @@ import { createContext, memo, useContext, useEffect, useRef, useState } from "re
 import { Response } from "./response";
 import { Shimmer } from "./shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
-import { pickRandomPastTense, type FunLabelCategory } from "@/lib/fun-labels";
+import { pickStablePastTense, type FunLabelCategory } from "@/lib/fun-labels";
 
 type ReasoningContextValue = {
   isStreaming: boolean;
@@ -133,7 +133,7 @@ function StreamingThinkingLabel({ category }: { category: FunLabelCategory }) {
 }
 
 function CompletedThinkingLabel({ category, duration }: { category: FunLabelCategory; duration?: number }) {
-  const [label] = useState(() => pickRandomPastTense(category));
+  const [label] = useState(() => pickStablePastTense(category, 0));
   if (duration === undefined) {
     return <p>{label} for a few seconds</p>;
   }

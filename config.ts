@@ -2,37 +2,37 @@
 // Central app config (NO static MODEL export) --> myAI6
 
 function getDateAndTime(): string {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", {
+  const now = new Date("2026-10-01T18:18:00+05:30");
+  const dateStr = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
-  });
-  const timeStr = now.toLocaleTimeString("en-US", {
+    timeZone: "Asia/Kolkata",
+  }).format(now);
+  const timeStr = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
-  });
+    timeZone: "Asia/Kolkata",
+  }).format(now);
   return `The day today is ${dateStr} and the time right now is ${timeStr}.`;
 }
 
 export const DATE_AND_TIME = getDateAndTime();
 
 // --- Assistant identity (all user-facing naming derives from these) ---
-export const AI_NAME = "Discount Approval Guardian"; // ← your assistant's name (rename freely)
-export const OWNER_NAME = "Commercial Governance"; // ← the organization/function this assistant represents
-export const AI_DESCRIPTION = `
-${AI_NAME} is an AI governance agent that sits between sales teams and customer-facing proposals. It enforces corporate discount decision-rights policies, calculates deal economics deterministically, and identifies the exact approval authority required before proposals can be released.
-`.trim();
+export const AI_NAME = "DealGuard";
+export const OWNER_NAME = "DealGuard";
+export const AI_DESCRIPTION = "AI Decision-Rights & Deal Governance";
 
 // Browser tab / metadata title. Change freely — one line, no other edits needed.
-export const BROWSER_TAB_TITLE = `${AI_NAME}`;
+export const BROWSER_TAB_TITLE = `${AI_NAME} | ${AI_DESCRIPTION}`;
 
-export const WELCOME_MESSAGE = `Welcome to ${AI_NAME}. I verify commercial deal economics and enforce corporate discount decision-rights policies. Share your deal details (customer name, quantity, unit price, and requested discount) to evaluate authorization.`;
+export const WELCOME_MESSAGE = `Welcome to ${AI_NAME}. The Sales Agent proposes the commercial action and ${AI_NAME} independently validates decision rights before any proposal is releasable.`;
 export const CLEAR_CHAT_TEXT = "New Deal";
 
-// --- Defaults (PROF REQUIREMENT: Anthropic by default) ---
+// --- Defaults (Anthropic by default) ---
 export const DEFAULT_VENDOR = "anthropic" as const;
 
 // Use Claude Haiku 4.5 (cost-efficient, thinking budget separate from output)
@@ -102,7 +102,7 @@ export const PINECONE_VISUALS_PER_SOURCE = 20; // max figure/table chunks merged
 // The model uses this to decide whether to search the KB or skip it entirely.
 export const KB_SCOPE = `
 The governance policy covers commercial discount decision rights:
-- Discount <= 10%: AI Delegated Authority (auto-approved under prototype policy).
+- Discount <= 10%: AI Delegated Authority (auto-approved under current discount policy).
 - Discount > 10% and <= 20%: Sales Manager approval required.
 - Discount > 20% and <= 30%: Finance approval required.
 - Discount > 30%: Blocked (cannot be approved through normal workflow).

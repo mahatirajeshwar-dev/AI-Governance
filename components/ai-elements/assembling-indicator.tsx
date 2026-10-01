@@ -2,13 +2,13 @@
 
 import { Shimmer } from "./shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
-import { pickRandomPastTense } from "@/lib/fun-labels";
+import { pickStablePastTense } from "@/lib/fun-labels";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
 export function AssemblingIndicator({ isStreaming = true }: { isStreaming?: boolean }) {
   const activeLabel = useRotatingLabel("assembling", 3000);
-  const [pastLabel] = useState(() => pickRandomPastTense("assembling"));
+  const [pastLabel] = useState(() => pickStablePastTense("assembling", 0));
 
   return (
     <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">

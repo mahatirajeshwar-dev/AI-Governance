@@ -1,5 +1,6 @@
 import { UIMessage } from "ai";
 import { nanoid } from "nanoid";
+import { normalizeDealMessage } from "@/lib/messages";
 
 export type Conversation = {
   id: string;
@@ -80,8 +81,17 @@ export function loadConversationData(id: string): ConversationData {
     const raw = localStorage.getItem(DATA_PREFIX + id);
     if (!raw) return { messages: [], durations: {} };
     const parsed = JSON.parse(raw);
+    const normalizedMessages = Array.isArray(parsed.messages)
+      ? parsed.messages.map((message: Partial<UIMessage>, index: number) =>
+          normalizeDealMessage(message, {
+            dealId: `${id}-legacy-${index + 1}`,
+            actor: message.role === "user" ? "user" : "sales-agent",
+            sequence: index + 1,
+          })
+        )
+      : [];
     return {
-      messages: parsed.messages || [],
+      messages: normalizedMessages,
       durations: parsed.durations || {},
       // Preserve compaction and feedback fields
       ...(parsed.compactedSummary ? { compactedSummary: parsed.compactedSummary } : {}),
@@ -110,9 +120,17 @@ export function saveConversationData(
     if (conv.title === "New Chat" && data.messages.length > 0) {
       const firstUserMsg = data.messages.find((m) => m.role === "user");
       if (firstUserMsg) {
-        const text = firstUserMsg.parts
-          .filter((p) => p.type === "text")
-          .map((p: any) => p.text)
+        const safeParts = Array.isArray(firstUserMsg.parts) ? firstUserMsg.parts : [];
+        const text = safeParts
+          .filter(
+            (p): p is { type: "text"; text: string } =>
+              !!p &&
+              typeof p === "object" &&
+              "type" in p &&
+              p.type === "text" &&
+              typeof (p as { text?: string }).text === "string"
+          )
+          .map((p) => p.text)
           .join(" ")
           .trim();
         if (text) {

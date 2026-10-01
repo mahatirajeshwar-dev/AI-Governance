@@ -6,27 +6,32 @@ import { toast } from "sonner";
 import * as z from "zod";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, UIMessage } from "ai";
+import { DefaultChatTransport } from "ai";
 import {
   ArrowUp,
   Download,
   FileText,
   Mic,
   PanelLeft,
-  Plus,
   ShieldCheck,
   Square,
 } from "lucide-react";
 import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator";
 import { MessageWall } from "@/components/messages/message-wall";
 import { ChatHeader, ChatHeaderBlock } from "@/app/parts/chat-header";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useEffect, useState, useRef, useCallback } from "react";
-import { AI_NAME, CLEAR_CHAT_TEXT, OWNER_NAME, WELCOME_MESSAGE, COMPACTION_ENABLED, COMPACTION_TOKEN_THRESHOLD, COMPACTION_SHOW_CONTEXT_MEMORY, MAX_MESSAGE_TEXT_LENGTH } from "@/config";
-import Image from "next/image";
+import {
+  AI_DESCRIPTION,
+  AI_NAME,
+  OWNER_NAME,
+  WELCOME_MESSAGE,
+  COMPACTION_ENABLED,
+  COMPACTION_TOKEN_THRESHOLD,
+  COMPACTION_SHOW_CONTEXT_MEMORY,
+  MAX_MESSAGE_TEXT_LENGTH,
+} from "@/config";
 import Link from "next/link";
 import { ConversationSidebar } from "@/components/conversation-sidebar";
 import {
@@ -39,6 +44,20 @@ import {
   saveCompactedSummary,
   loadFeedback,
 } from "@/lib/storage";
+import { GovernancePanel } from "@/components/dealguard/governance-panel";
+import {
+  createBlankDeal,
+  createDemoDeals,
+  hasCompleteProposal,
+  hasProposalDetails,
+  parseCommercialRequest,
+  processCommercialMessage,
+  setDealApproval,
+  setDealWorkflowPhase,
+  type DealWorkflowPhase,
+  type Deal,
+} from "@/lib/deals";
+import { createDealId, createDealMessage, normalizeDealMessage } from "@/lib/messages";
 
 const formSchema = z.object({
   message: z
@@ -53,9 +72,24 @@ export default function Chat() {
   const [isClient, setIsClient] = useState(false);
   const [durations, setDurations] = useState<Record<string, number>>({});
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [deals, setDeals] = useState<Deal[]>(() => createDemoDeals());
+  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showContextMemory, setShowContextMemory] = useState(false);
   const welcomeMessageShownRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!selectedDealId && deals[0]) {
+      setSelectedDealId(deals[0].id);
+    }
+
+    if (selectedDealId && !deals.some((deal) => deal.id === selectedDealId) && deals[0]) {
+      setSelectedDealId(deals[0].id);
+    }
+  }, [deals, selectedDealId]);
+
+  const selectedDeal = deals.find((deal) => deal.id === selectedDealId) ?? deals[0] ?? null;
+  const workflowBusy = selectedDeal !== null && ["sales-agent", "handoff", "dealguard-review"].includes(selectedDeal.workflowPhase);
 
   // Compaction state: stored summary persists across requests
   const summaryRef = useRef<{ summary: string; summarizedUpTo: number; signature: string } | null>(null);
@@ -74,19 +108,16 @@ export default function Chat() {
     }
   }, [isClient, activeConvId]);
 
-  const { messages, sendMessage, status, stop, setMessages } = useChat({
+  const { sendMessage, status, stop, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/chat",
       fetch: async (url, options) => {
-        // Inject compaction summary via headers (body modification doesn't work with SDK)
         const headers = new Headers(options?.headers);
         if (summaryRef.current) {
           headers.set("X-Compacted-Summary", btoa(unescape(encodeURIComponent(summaryRef.current.summary))));
           headers.set("X-Compacted-UpTo", String(summaryRef.current.summarizedUpTo));
           headers.set("X-Compacted-Signature", summaryRef.current.signature);
-          // Debug: console.log(`COMPACTION: sending ${summaryRef.current.summary.length} chars, upTo: ${summaryRef.current.summarizedUpTo}`);
         }
-        // Send feedback ratings for compaction quality
         if (activeConvIdRef.current) {
           const fb = loadFeedback(activeConvIdRef.current);
           if (Object.keys(fb).length > 0) {
@@ -95,18 +126,15 @@ export default function Chat() {
         }
         const response = await fetch(url, { ...options, headers });
 
-        // Read updated summary from response headers
         const newSummaryB64 = response.headers.get("X-Compacted-Summary");
         const newUpTo = response.headers.get("X-Compacted-UpTo");
         const newSignature = response.headers.get("X-Compacted-Signature");
-        // Debug: console.log(`COMPACTION: received summary=${!!newSummaryB64}, upTo=${newUpTo}`);
         if (newSummaryB64 && newUpTo && newSignature && activeConvIdRef.current) {
           try {
             const summary = decodeURIComponent(escape(atob(newSummaryB64)));
             const summarizedUpTo = parseInt(newUpTo, 10);
             summaryRef.current = { summary, summarizedUpTo, signature: newSignature };
             saveCompactedSummary(activeConvIdRef.current, summary, summarizedUpTo, newSignature);
-            // Debug: console.log(`COMPACTION: saved ${summary.length} chars, upTo: ${summarizedUpTo}`);
           } catch (e) {
             console.warn("Compaction save failed:", e);
           }
@@ -116,6 +144,28 @@ export default function Chat() {
       },
     }),
     experimental_throttle: 50,
+    onFinish(event) {
+      const targetDealId = selectedDealId;
+      if (!targetDealId) return;
+      setDeals((prev) =>
+        prev.map((deal) => {
+          if (deal.id !== targetDealId) return deal;
+          const storedMessage = normalizeDealMessage(event.message, {
+            dealId: targetDealId,
+            actor: "sales-agent",
+            sequence: deal.messages.length + 1,
+          });
+          const hasContent = storedMessage.parts.some((part) =>
+            part.type === "text" ? Boolean(part.text.trim()) : true
+          );
+          if (!hasContent) return deal;
+          return {
+            ...deal,
+            messages: [...deal.messages, storedMessage],
+          };
+        })
+      );
+    },
     onError(error) {
       toast.error(error.message || "Something went wrong. Please try again.");
     },
@@ -147,11 +197,13 @@ export default function Chat() {
 
     // Show welcome message if this is a fresh conversation
     if (data.messages.length === 0 && !welcomeMessageShownRef.current) {
-      const welcomeMessage: UIMessage = {
-        id: `welcome-${Date.now()}`,
+      const welcomeMessage = createDealMessage({
+        dealId: createDealId("welcome"),
+        actor: "dealguard",
         role: "assistant",
-        parts: [{ type: "text", text: WELCOME_MESSAGE }],
-      };
+        text: WELCOME_MESSAGE,
+        sequence: 1,
+      });
       setMessages([welcomeMessage]);
       saveConversationData(convId, {
         messages: [welcomeMessage],
@@ -161,19 +213,10 @@ export default function Chat() {
     }
   }, []);
 
-  // Persist messages whenever they change (preserving compaction fields)
-  useEffect(() => {
-    if (isClient && activeConvId) {
-      const existing = loadConversationData(activeConvId);
-      saveConversationData(activeConvId, {
-        messages,
-        durations,
-        ...(existing.compactedSummary ? { compactedSummary: existing.compactedSummary } : {}),
-        ...(existing.summarizedUpTo !== undefined ? { summarizedUpTo: existing.summarizedUpTo } : {}),
-        ...(existing.compactedSignature ? { compactedSignature: existing.compactedSignature } : {}),
-      });
-    }
-  }, [durations, messages, isClient, activeConvId]);
+  const activeDealMessages = selectedDeal?.messages ?? [];
+  const visibleDealMessages = activeDealMessages.filter((message) =>
+    message.id !== selectedDeal?.pendingDealGuardMessageId || selectedDeal.workflowPhase === "complete"
+  );
 
   // Compaction notification is handled by the model in its response text
   // (server instructs the model to include a notice when compaction occurs)
@@ -186,8 +229,59 @@ export default function Chat() {
   // Shared send path for both the text form and quick-reply option chips.
   function sendText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    // Include stored summary in the request body for stateful compaction
+    if (!trimmed || !/[a-z0-9]/i.test(trimmed) || !selectedDealId || workflowBusy || status === "streaming" || status === "submitted") return;
+
+    const parsedProposal = parseCommercialRequest(trimmed);
+    const isProposalTurn = hasProposalDetails(parsedProposal) || Boolean(
+      selectedDeal && hasProposalDetails(selectedDeal) && !hasCompleteProposal(selectedDeal)
+    );
+
+    if (isProposalTurn) {
+      const targetDealId = selectedDealId;
+      const targetDeal = selectedDeal;
+      if (!targetDeal) return;
+      const processedDeal = processCommercialMessage(targetDeal, trimmed);
+      setDeals((prev) => prev.map((deal) => deal.id === targetDealId ? processedDeal : deal));
+
+      if (processedDeal.workflowPhase === "sales-agent") {
+        const transition = (expected: DealWorkflowPhase, next: DealWorkflowPhase) => {
+          setDeals((prev) => prev.map((deal) =>
+            deal.id === targetDealId && deal.workflowPhase === expected
+              ? setDealWorkflowPhase(deal, next)
+              : deal
+          ));
+        };
+        window.setTimeout(() => {
+          transition("sales-agent", "handoff");
+          window.setTimeout(() => {
+            transition("handoff", "dealguard-review");
+            window.setTimeout(() => transition("dealguard-review", "complete"), 530);
+          }, 280);
+        }, 140);
+      }
+      return;
+    }
+
+    const dealSequence = (selectedDeal?.messages.length ?? 0) + 1;
+    const userMessage = createDealMessage({
+      dealId: selectedDealId,
+      actor: "user",
+      role: "user",
+      text: trimmed,
+      sequence: dealSequence,
+    });
+
+    setDeals((prev) =>
+      prev.map((deal) =>
+        deal.id === selectedDealId
+          ? {
+              ...deal,
+              messages: [...deal.messages, userMessage],
+            }
+          : deal
+      )
+    );
+
     const s = summaryRef.current;
     sendMessage({
       text: trimmed,
@@ -272,33 +366,43 @@ export default function Chat() {
     welcomeMessageShownRef.current = true;
   }
 
-  function newChat() {
-    const conv = createConversation();
-    setActiveConvId(conv.id);
-    setDurations({});
-    welcomeMessageShownRef.current = false;
+  function newDeal() {
+    const existingDraft = deals.find(
+      (deal) =>
+        deal.customerName === "—" &&
+        deal.quantity === null &&
+        deal.unitPrice === null &&
+        deal.proposedDiscount === null
+    );
 
-    const welcomeMessage: UIMessage = {
-      id: `welcome-${Date.now()}`,
-      role: "assistant",
-      parts: [{ type: "text", text: WELCOME_MESSAGE }],
-    };
-    setMessages([welcomeMessage]);
-    saveConversationData(conv.id, {
-      messages: [welcomeMessage],
-      durations: {},
-    });
-    welcomeMessageShownRef.current = true;
-    toast.success("New chat started");
+    if (existingDraft) {
+      setSelectedDealId(existingDraft.id);
+      toast.success("Blank draft reused");
+      return;
+    }
+
+    const freshDeal = createBlankDeal(createDealId("deal"));
+    setDeals((prev) => [freshDeal, ...prev]);
+    setSelectedDealId(freshDeal.id);
+    toast.success("New deal opened");
+  }
+
+  function handleApproveDeal(dealId: string) {
+    setDeals((prev) => prev.map((deal) => deal.id === dealId ? setDealApproval(deal, "APPROVED") : deal));
+  }
+
+  function handleRejectDeal(dealId: string) {
+    setDeals((prev) => prev.map((deal) => deal.id === dealId ? setDealApproval(deal, "REJECTED") : deal));
   }
 
   function exportChat() {
-    if (messages.length === 0) {
+    const dealMessages = selectedDeal?.messages ?? [];
+    if (dealMessages.length === 0) {
       toast.error("No messages to export");
       return;
     }
 
-    const markdown = messages
+    const markdown = dealMessages
       .map((msg) => {
         const role = msg.role === "user" ? "You" : AI_NAME;
         const text = msg.parts
@@ -322,24 +426,12 @@ export default function Chat() {
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey;
-
-      if (isMod && e.key === "k") {
-        e.preventDefault();
-        newChat();
-      }
-
       if (
         e.key === "Escape" &&
         (status === "streaming" || status === "submitted")
       ) {
         e.preventDefault();
         stop();
-      }
-
-      if (isMod && e.key === "b") {
-        e.preventDefault();
-        setSidebarOpen((prev) => !prev);
       }
     },
     [status, stop]
@@ -352,26 +444,35 @@ export default function Chat() {
 
   return (
     <div className="flex h-screen font-sans dark:bg-black">
-      {/* Sidebar — overlay on mobile (<md), inline on desktop */}
+      {isClient && (
+        <aside className="hidden h-screen w-64 shrink-0 md:block">
+          <ConversationSidebar
+            deals={deals}
+            activeDealId={selectedDealId}
+            onSelectDeal={setSelectedDealId}
+            onNewDeal={newDeal}
+            onClose={() => {}}
+          />
+        </aside>
+      )}
       {isClient && sidebarOpen && (
         <>
-          {/* Mobile backdrop */}
           <div
             className="fixed inset-0 z-40 bg-black/40 md:hidden"
             onClick={() => setSidebarOpen(false)}
             aria-hidden="true"
           />
-          <div className="fixed inset-y-0 left-0 z-50 md:static md:z-auto">
+          <div className="fixed inset-y-0 left-0 z-50 md:hidden">
             <ConversationSidebar
-              key={`sidebar-${activeConvId}-${messages.length}`}
-              activeId={activeConvId}
-              onSelect={(id) => {
-                switchConversation(id);
-                if (typeof window !== "undefined" && !window.matchMedia("(min-width: 768px)").matches) setSidebarOpen(false);
+              deals={deals}
+              activeDealId={selectedDealId}
+              onSelectDeal={(id) => {
+                setSelectedDealId(id);
+                setSidebarOpen(false);
               }}
-              onNew={() => {
-                newChat();
-                if (typeof window !== "undefined" && !window.matchMedia("(min-width: 768px)").matches) setSidebarOpen(false);
+              onNewDeal={() => {
+                newDeal();
+                setSidebarOpen(false);
               }}
               onClose={() => setSidebarOpen(false)}
             />
@@ -379,31 +480,33 @@ export default function Chat() {
         </>
       )}
 
-      <main className="relative h-screen flex-1 min-w-0">
-        <div className={`fixed top-0 right-0 z-50 pb-16 pointer-events-none ${sidebarOpen ? 'left-0 md:left-64' : 'left-0'}`}>
+      <main className="relative flex h-screen min-w-0 flex-1 flex-col overflow-y-auto xl:overflow-hidden">
+        <div className="sticky top-0 z-50 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur-sm">
           <ChatHeader>
             <ChatHeaderBlock>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="h-8 w-8 md:hidden"
                 onClick={() => setSidebarOpen((prev) => !prev)}
-                aria-label="Toggle sidebar"
+                aria-label="Open deals"
               >
                 <PanelLeft className="size-4" />
               </Button>
             </ChatHeaderBlock>
             <ChatHeaderBlock className="justify-center items-center gap-2">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
-                <span className="flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <div className="flex items-center gap-3 text-sm font-semibold text-foreground/80">
+                <span className="flex size-7 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
                   <ShieldCheck className="size-3.5" />
                 </span>
-                {AI_NAME}
+                <div className="flex flex-col leading-none">
+                  <span>{AI_NAME}</span>
+                  <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">{AI_DESCRIPTION}</span>
+                </div>
               </div>
             </ChatHeaderBlock>
 
             <ChatHeaderBlock className="justify-end gap-2">
-              {/* Context Memory dropdown (toggle via COMPACTION_SHOW_CONTEXT_MEMORY in config) */}
               {(() => {
                 if (!COMPACTION_SHOW_CONTEXT_MEMORY) return null;
                 const cs = activeConvId ? loadCompactedSummary(activeConvId) : null;
@@ -443,146 +546,129 @@ export default function Chat() {
               >
                 <Download className="size-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={newChat} aria-label="New chat">
-                <Plus className="size-4" />
-                {CLEAR_CHAT_TEXT}
-              </Button>
             </ChatHeaderBlock>
           </ChatHeader>
         </div>
 
-        <div className="h-screen w-full overflow-y-auto px-3 sm:px-5 py-4 pt-[88px] pb-[170px]">
-          <div className={`flex min-h-full flex-col items-center ${messages.length <= 1 ? "justify-center" : "justify-end"}`}>
-            {isClient && (
-              <>
-                {messages.length <= 1 && (
-                  <div className="mb-6 flex size-20 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <ShieldCheck className="size-9" strokeWidth={1.5} />
-                  </div>
-                )}
-                <MessageWall
-                  messages={messages}
-                  status={status}
-                  durations={durations}
-                  conversationId={activeConvId ?? undefined}
-                  onDurationChange={(k, d) =>
-                    setDurations((prev) => ({
-                      ...prev,
-                      [k]: d,
-                    }))
-                  }
-                  onOptionSelect={handleOptionSelect}
-                />
-                {status === "submitted" && (
-                  <div className="max-w-3xl w-full">
-                    <ThinkingIndicator isCompacting={(() => {
-                      if (!COMPACTION_ENABLED || messages.length <= 4) return false;
-                      let chars = 0;
-                      for (const msg of messages) {
-                        for (const part of msg.parts) {
-                          const p = part as any;
-                          chars += p.type === "text" ? (p.text?.length ?? 0) : JSON.stringify(p).length;
-                        }
+        <div className="min-h-0 flex-1 px-3 py-4 sm:px-5 xl:overflow-hidden xl:px-6 xl:py-6">
+          <div className="mx-auto grid min-h-full w-full max-w-[1480px] grid-cols-1 gap-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_minmax(400px,480px)] xl:gap-6">
+            <section className="flex min-w-0 flex-col xl:min-h-0">
+              <div className="min-w-0 flex-1 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
+                {isClient && (
+                  <>
+                    <MessageWall
+                      messages={visibleDealMessages}
+                      status={status}
+                      workflowPhase={selectedDeal?.workflowPhase}
+                      durations={durations}
+                      conversationId={selectedDeal?.id ?? undefined}
+                      onDurationChange={(k, d) =>
+                        setDurations((prev) => ({
+                          ...prev,
+                          [k]: d,
+                        }))
                       }
-                      return Math.ceil(chars / 4) >= COMPACTION_TOKEN_THRESHOLD;
-                    })()} />
-                  </div>
+                      onOptionSelect={handleOptionSelect}
+                    />
+                    {status === "submitted" && (
+                      <div className="w-full max-w-[760px]">
+                        <ThinkingIndicator isCompacting={(() => {
+                          if (!COMPACTION_ENABLED || activeDealMessages.length <= 4) return false;
+                          let chars = 0;
+                          for (const msg of activeDealMessages) {
+                            for (const part of msg.parts) {
+                              const p = part as any;
+                              chars += p.type === "text" ? (p.text?.length ?? 0) : JSON.stringify(p).length;
+                            }
+                          }
+                          return Math.ceil(chars / 4) >= COMPACTION_TOKEN_THRESHOLD;
+                        })()} />
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="fixed bottom-0 left-0 right-0 z-50 overflow-visible bg-linear-to-t from-background via-background/60 to-transparent pt-6 pb-3">
-          <div className="relative mx-auto max-w-3xl px-3 sm:px-5">
-            <div className="message-fade-overlay" />
-
-            <form onSubmit={form.handleSubmit(onSubmit)}>
-              <FieldGroup>
+              </div>
+              <form className="shrink-0 pt-3" onSubmit={form.handleSubmit(onSubmit)}>
                 <Controller
                   name="message"
                   control={form.control}
                   render={({ field, fieldState }) => (
-                    <Field data-invalid={fieldState.invalid}>
-                      <FieldLabel className="sr-only">Message</FieldLabel>
-
-                      <div className="relative">
-                        {/* Multi-line input: Enter sends, Shift+Enter inserts a
-                            newline. Grows with content (field-sizing) up to
-                            max-h, then scrolls. */}
-                        <Textarea
-                          {...field}
-                          rows={1}
-                          className="min-h-14 max-h-48 resize-none overflow-y-auto rounded-[20px] bg-card pl-5 pr-24 py-[18px] leading-5 shadow-lg shadow-black/5 border border-border/60"
-                          placeholder={isListening ? "Listening..." : "Type your message here... (Shift+Enter for a new line)"}
-                          disabled={status === "streaming"}
-                          aria-invalid={fieldState.invalid}
-                          autoComplete="off"
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              form.handleSubmit(onSubmit)();
-                            }
-                          }}
-                        />
-
-                        {voiceSupported && (
-                          <Button
-                            className={`absolute bottom-2.5 right-12 rounded-full ${isListening ? "animate-pulse" : ""}`}
-                            type="button"
-                            variant={isListening ? "default" : "ghost"}
-                            size="icon"
-                            disabled={status === "streaming"}
-                            onClick={toggleVoiceInput}
-                            aria-pressed={isListening}
-                            aria-label={isListening ? "Stop voice input" : "Start voice input"}
-                            title={isListening ? "Stop voice input" : "Speak your message"}
-                          >
-                            <Mic className="size-4" />
-                          </Button>
-                        )}
-
-                        {(status === "ready" || status === "error") && (
-                          <Button
-                            className="absolute bottom-2.5 right-3 rounded-full"
-                            type="submit"
-                            disabled={!field.value?.trim()}
-                            size="icon"
-                          >
-                            <ArrowUp className="size-4" />
-                          </Button>
-                        )}
-
-                        {(status === "streaming" ||
-                          status === "submitted") && (
-                          <Button
-                            className="absolute bottom-2.5 right-3 rounded-full"
-                            size="icon"
-                            type="button"
-                            onClick={() => stop()}
-                          >
-                            <Square className="size-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </Field>
+                    <div className="relative">
+                      <Textarea
+                        {...field}
+                        rows={1}
+                        className="min-h-14 max-h-48 resize-none overflow-y-auto rounded-2xl bg-white pl-4 pr-24 py-4 leading-5 shadow-sm border border-slate-300/80 focus-visible:ring-sky-600/30"
+                        placeholder={isListening ? "Listening..." : "Describe a customer deal or reply to the Sales Agent..."}
+                        disabled={workflowBusy || status === "streaming" || status === "submitted"}
+                        aria-label="Message"
+                        aria-invalid={fieldState.invalid}
+                        autoComplete="off"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            form.handleSubmit(onSubmit)();
+                          }
+                        }}
+                      />
+                      {voiceSupported && (
+                        <Button
+                          className={`absolute bottom-2.5 right-12 rounded-lg ${isListening ? "animate-pulse" : ""}`}
+                          type="button"
+                          variant={isListening ? "default" : "ghost"}
+                          size="icon"
+                          disabled={workflowBusy || status === "streaming" || status === "submitted"}
+                          onClick={toggleVoiceInput}
+                          aria-pressed={isListening}
+                          aria-label={isListening ? "Stop voice input" : "Start voice input"}
+                          title={isListening ? "Stop voice input" : "Speak your message"}
+                        >
+                          <Mic className="size-4" />
+                        </Button>
+                      )}
+                      {(status === "ready" || status === "error") && (
+                        <Button
+                          className="absolute bottom-2.5 right-2 rounded-lg bg-sky-700 text-white hover:bg-sky-800"
+                          type="submit"
+                          disabled={workflowBusy || !field.value?.trim()}
+                          size="icon"
+                          aria-label="Send message"
+                        >
+                          <ArrowUp className="size-4" />
+                        </Button>
+                      )}
+                      {(status === "streaming" || status === "submitted") && (
+                        <Button
+                          className="absolute bottom-2.5 right-2 rounded-lg"
+                          size="icon"
+                          type="button"
+                          onClick={() => stop()}
+                          aria-label="Stop response"
+                        >
+                          <Square className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                   )}
                 />
-              </FieldGroup>
-            </form>
+              </form>
+              <div className="shrink-0 pt-2 text-center text-[11px] text-muted-foreground">
+                &copy; {new Date().getFullYear()} {OWNER_NAME}{" "}
+                <Link href="/terms" className="underline">Terms of Use</Link>{" "}
+                Powered by{" "}
+                <Link href="https://www.ringel.ai" className="underline">ringel.AI</Link>
+              </div>
+            </section>
 
-            <div className="mt-2 text-center text-xs text-muted-foreground">
-              &copy; {new Date().getFullYear()} {OWNER_NAME}{" "}
-              <Link href="/terms" className="underline">
-                Terms of Use
-              </Link>{" "}
-              Powered by{" "}
-              <Link href="https://www.ringel.ai" className="underline">
-                ringel.AI
-              </Link>
+            <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
+              <GovernancePanel
+                deal={selectedDeal}
+                onApprove={handleApproveDeal}
+                onReject={handleRejectDeal}
+              />
             </div>
           </div>
         </div>
+
       </main>
     </div>
   );

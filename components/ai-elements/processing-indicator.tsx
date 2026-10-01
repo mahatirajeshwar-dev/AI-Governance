@@ -2,13 +2,13 @@
 
 import { Shimmer } from "./shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
-import { pickRandomPastTense } from "@/lib/fun-labels";
+import { pickStablePastTense } from "@/lib/fun-labels";
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 export function ProcessingIndicator({ isStreaming = true }: { isStreaming?: boolean }) {
   const activeLabel = useRotatingLabel("processing", 3000);
-  const [pastLabel] = useState(() => pickRandomPastTense("processing"));
+  const [pastLabel] = useState(() => pickStablePastTense("processing", 0));
 
   return (
     <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">

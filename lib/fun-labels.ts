@@ -68,13 +68,23 @@ export type FunLabelCategory = keyof typeof FUN_LABELS;
 /** Pick a random label from a category, optionally excluding a specific one. */
 export function pickRandom(
   category: FunLabelCategory,
-  exclude?: string
+  exclude?: string,
+  indexOverride?: number
 ): string {
   const labels = FUN_LABELS[category];
   const candidates = exclude
     ? labels.filter((l) => l !== exclude)
     : [...labels];
+
+  if (typeof indexOverride === "number") {
+    return candidates[indexOverride % candidates.length];
+  }
+
   return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+export function pickStable(category: FunLabelCategory, index = 0): string {
+  return FUN_LABELS[category][index % FUN_LABELS[category].length];
 }
 
 /**
@@ -145,7 +155,19 @@ export const PAST_TENSE: Record<FunLabelCategory, string[]> = {
   ],
 };
 
-export function pickRandomPastTense(category: FunLabelCategory): string {
+export function pickRandomPastTense(
+  category: FunLabelCategory,
+  indexOverride?: number
+): string {
   const labels = PAST_TENSE[category];
+
+  if (typeof indexOverride === "number") {
+    return labels[indexOverride % labels.length];
+  }
+
   return labels[Math.floor(Math.random() * labels.length)];
+}
+
+export function pickStablePastTense(category: FunLabelCategory, index = 0): string {
+  return PAST_TENSE[category][index % PAST_TENSE[category].length];
 }
