@@ -3,6 +3,7 @@ import { calculateDeal, checkDiscountAuthority } from "@/app/api/chat/tools/deal
 import { createWebSearch } from "@/app/api/chat/tools/web-search";
 import { createFetchOwnerProfiles } from "@/app/api/chat/tools/fetch-owner-profiles";
 import { createVectorDatabaseSearch } from "@/app/api/chat/tools/search-vector-database";
+import { UNIT_PRICE } from "@/lib/pricing";
 import {
   ENABLE_WEB_SEARCH,
   ENABLE_VECTOR_SEARCH,
@@ -58,12 +59,13 @@ export function buildToolGuidance(): string {
 
 - calculateDeal:
   * MUST be called for ANY monetary deal calculations (list value, discount amount, final deal value).
+  * Uses the fixed ₹${UNIT_PRICE.toLocaleString("en-IN")} unit price; do not supply or infer a different price.
   * CRITICAL: The model must NEVER perform authoritative monetary calculations or mental math internally.
 
 - TOOL USAGE RULES:
   * Do NOT require both tools on every conversation.
-  * For authorization questions without complete quantity/unit price, use checkDiscountAuthority alone.
-  * When full deal details (quantity, unit price, discount) are provided, use calculateDeal for the figures and checkDiscountAuthority for the approval rights.
+  * For authorization questions without quantity, use checkDiscountAuthority alone.
+  * When quantity and discount are provided, use calculateDeal for the figures and checkDiscountAuthority for the approval rights.
   * Always relay tool outputs accurately without hallucinating or overriding results.`
   ];
 

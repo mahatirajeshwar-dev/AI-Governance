@@ -1,6 +1,7 @@
 import { UIMessage } from "ai";
 import { nanoid } from "nanoid";
 import { normalizeDealMessage } from "@/lib/messages";
+import { migrateSavedDeal, type Deal } from "@/lib/deals";
 
 export type Conversation = {
   id: string;
@@ -24,6 +25,60 @@ type ConversationData = {
 
 const INDEX_KEY = "chat-conversations";
 const DATA_PREFIX = "chat-data-";
+const DEAL_WORKSPACE_KEY = "dealguard-workspace";
+
+export interface DealWorkspace {
+  deals: Deal[];
+  selectedDealId: string | null;
+}
+
+export function loadDealWorkspace(): DealWorkspace | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(DEAL_WORKSPACE_KEY);
+  if (!raw) return null;
+
+  const stored: unknown = JSON.parse(raw);
+  if (
+    typeof stored !== "object" ||
+    stored === null ||
+    !("deals" in stored) ||
+    !Array.isArray(stored.deals)
+  ) {
+    throw new Error("Saved DealGuard workspace has an invalid format.");
+  }
+
+  const migratedDeals = stored.deals.map((deal: unknown) => {
+    if (
+      typeof deal !== "object" ||
+      deal === null ||
+      !("id" in deal) ||
+      typeof deal.id !== "string" ||
+      !("auditTrail" in deal) ||
+      !Array.isArray(deal.auditTrail) ||
+      !("messages" in deal) ||
+      !Array.isArray(deal.messages)
+    ) {
+      throw new Error("A saved deal has an invalid format.");
+    }
+    return migrateSavedDeal(deal as Deal);
+  });
+  const deals = migratedDeals.map(({ deal }) => deal);
+  const selectedDealId =
+    "selectedDealId" in stored && typeof stored.selectedDealId === "string"
+      ? stored.selectedDealId
+      : null;
+
+  if (migratedDeals.some(({ migrated }) => migrated)) {
+    saveDealWorkspace({ deals, selectedDealId });
+  }
+
+  return { deals, selectedDealId };
+}
+
+export function saveDealWorkspace(workspace: DealWorkspace): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(DEAL_WORKSPACE_KEY, JSON.stringify(workspace));
+}
 
 function getIndex(): Conversation[] {
   if (typeof window === "undefined") return [];

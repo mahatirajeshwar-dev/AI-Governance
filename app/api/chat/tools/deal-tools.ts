@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { UNIT_PRICE } from "@/lib/pricing";
 
 export type DiscountAuthorityStatus =
   | "AUTO_APPROVED"
@@ -42,6 +43,7 @@ export function formatINR(val: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(val);
 }
@@ -127,7 +129,6 @@ export function evaluateDiscountAuthority(
  */
 export function calculateDealTerms(
   quantity: number,
-  unitPrice: number,
   requestedDiscountPercent: number
 ): DealCalculationResult {
   if (
@@ -139,18 +140,6 @@ export function calculateDealTerms(
     return {
       success: false,
       error: "Quantity must be a valid positive number greater than 0.",
-    };
-  }
-
-  if (
-    typeof unitPrice !== "number" ||
-    Number.isNaN(unitPrice) ||
-    !Number.isFinite(unitPrice) ||
-    unitPrice <= 0
-  ) {
-    return {
-      success: false,
-      error: "Unit price must be a valid positive number greater than 0.",
     };
   }
 
@@ -168,20 +157,20 @@ export function calculateDealTerms(
     };
   }
 
-  const listValue = quantity * unitPrice;
+  const listValue = quantity * UNIT_PRICE;
   const discountAmount = listValue * (requestedDiscountPercent / 100);
   const dealValue = listValue - discountAmount;
 
   return {
     success: true,
     quantity,
-    unitPrice,
+    unitPrice: UNIT_PRICE,
     requestedDiscountPercent,
     listValue,
     discountAmount,
     dealValue,
     formatted: {
-      unitPrice: formatINR(unitPrice),
+      unitPrice: formatINR(UNIT_PRICE),
       listValue: formatINR(listValue),
       discountAmount: formatINR(discountAmount),
       dealValue: formatINR(dealValue),
@@ -195,18 +184,17 @@ export function calculateDealTerms(
  */
 export const calculateDeal = tool({
   description:
-    "Deterministically calculate the list value, discount amount, and final deal value for a commercial deal. Always call this tool for monetary deal calculations — never perform mental math.",
+    `Deterministically calculate the list value, discount amount, and final deal value using the fixed ₹${UNIT_PRICE.toLocaleString("en-IN")} unit price. Always call this tool for monetary deal calculations — never perform mental math.`,
   inputSchema: z.object({
     quantity: z.number().positive().describe("Quantity of items or licenses (must be greater than 0)."),
-    unitPrice: z.number().positive().describe("Unit price per item or license (must be greater than 0)."),
     requestedDiscountPercent: z
       .number()
       .min(0)
       .max(100)
       .describe("Requested discount percentage between 0 and 100 (e.g., 25 for 25%)."),
   }),
-  execute: async ({ quantity, unitPrice, requestedDiscountPercent }) => {
-    return calculateDealTerms(quantity, unitPrice, requestedDiscountPercent);
+  execute: async ({ quantity, requestedDiscountPercent }) => {
+    return calculateDealTerms(quantity, requestedDiscountPercent);
   },
 });
 

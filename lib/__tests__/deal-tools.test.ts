@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   evaluateDiscountAuthority,
+  formatINR,
   calculateDealTerms,
   calculateDeal,
   checkDiscountAuthority,
   type DiscountAuthorityResult,
   type DealCalculationResult,
 } from "@/app/api/chat/tools/deal-tools";
+import { UNIT_PRICE } from "@/lib/pricing";
 import {
   getAuthorityBand,
   isApprovalRequired,
@@ -123,55 +125,72 @@ describe("Deterministic Discount Authority Decision Rights", () => {
 });
 
 describe("Deterministic Deal Calculations", () => {
-  it("correctly calculates deal terms for 500 licenses @ ₹1,000 with 25% discount", () => {
-    const result = calculateDealTerms(500, 1000, 25);
+  it("calculates all commercial values using the fixed ₹2,500 unit price", () => {
+    const result = calculateDealTerms(500, 25);
     expect(result.success).toBe(true);
     expect(result.quantity).toBe(500);
-    expect(result.unitPrice).toBe(1000);
+    expect(result.unitPrice).toBe(UNIT_PRICE);
     expect(result.requestedDiscountPercent).toBe(25);
-    expect(result.listValue).toBe(500000);
-    expect(result.discountAmount).toBe(125000);
-    expect(result.dealValue).toBe(375000);
-    expect(result.formatted?.listValue).toContain("5,00,000");
-    expect(result.formatted?.discountAmount).toContain("1,25,000");
-    expect(result.formatted?.dealValue).toContain("3,75,000");
+    expect(result.listValue).toBe(1250000);
+    expect(result.discountAmount).toBe(312500);
+    expect(result.dealValue).toBe(937500);
+    expect(result.formatted?.unitPrice).toContain("2,500");
+    expect(result.formatted?.listValue).toContain("12,50,000");
+    expect(result.formatted?.discountAmount).toContain("3,12,500");
+    expect(result.formatted?.dealValue).toContain("9,37,500");
+  });
+
+  it("matches the JSW recommendation example using the fixed price", () => {
+    const result = calculateDealTerms(500, 12);
+    expect(result).toMatchObject({
+      success: true,
+      unitPrice: UNIT_PRICE,
+      listValue: 1250000,
+      discountAmount: 150000,
+      dealValue: 1100000,
+    });
+
+    expect(result.formatted).toMatchObject({
+      listValue: expect.stringContaining("12,50,000"),
+      discountAmount: expect.stringContaining("1,50,000"),
+      dealValue: expect.stringContaining("11,00,000"),
+    });
+  });
+
+  it("formats whole unit prices without decimal noise using Indian grouping", () => {
+    expect(formatINR(UNIT_PRICE)).toBe("₹2,500");
   });
 
   it("handles 0% discount correctly", () => {
-    const result = calculateDealTerms(10, 200, 0);
+    const result = calculateDealTerms(10, 0);
     expect(result.success).toBe(true);
-    expect(result.listValue).toBe(2000);
+    expect(result.listValue).toBe(25000);
     expect(result.discountAmount).toBe(0);
-    expect(result.dealValue).toBe(2000);
+    expect(result.dealValue).toBe(25000);
   });
 
   it("handles 100% discount correctly", () => {
-    const result = calculateDealTerms(10, 200, 100);
+    const result = calculateDealTerms(10, 100);
     expect(result.success).toBe(true);
-    expect(result.listValue).toBe(2000);
-    expect(result.discountAmount).toBe(2000);
+    expect(result.listValue).toBe(25000);
+    expect(result.discountAmount).toBe(25000);
     expect(result.dealValue).toBe(0);
   });
 
   describe("Invalid Calculation Inputs (Fail Safely)", () => {
     it("fails safely for zero or negative quantity", () => {
-      expect(calculateDealTerms(0, 100, 10).success).toBe(false);
-      expect(calculateDealTerms(-5, 100, 10).success).toBe(false);
-    });
-
-    it("fails safely for zero or negative unit price", () => {
-      expect(calculateDealTerms(10, 0, 10).success).toBe(false);
-      expect(calculateDealTerms(10, -50, 10).success).toBe(false);
+      expect(calculateDealTerms(0, 10).success).toBe(false);
+      expect(calculateDealTerms(-5, 10).success).toBe(false);
     });
 
     it("fails safely for invalid discount percentage", () => {
-      expect(calculateDealTerms(10, 100, -5).success).toBe(false);
-      expect(calculateDealTerms(10, 100, 105).success).toBe(false);
+      expect(calculateDealTerms(10, -5).success).toBe(false);
+      expect(calculateDealTerms(10, 105).success).toBe(false);
     });
 
     it("fails safely for NaN or non-finite inputs", () => {
-      expect(calculateDealTerms(Number.NaN, 100, 10).success).toBe(false);
-      expect(calculateDealTerms(10, Number.POSITIVE_INFINITY, 10).success).toBe(false);
+      expect(calculateDealTerms(Number.NaN, 10).success).toBe(false);
+      expect(calculateDealTerms(10, Number.POSITIVE_INFINITY).success).toBe(false);
     });
   });
 });
@@ -190,11 +209,12 @@ describe("AI SDK Tool Execution", () => {
   it("executes calculateDeal tool correctly", async () => {
     if (!calculateDeal.execute) throw new Error("execute not defined");
     const result = (await calculateDeal.execute(
-      { quantity: 500, unitPrice: 1000, requestedDiscountPercent: 25 },
+      { quantity: 500, requestedDiscountPercent: 25 },
       { toolCallId: "call_2", messages: [] }
     )) as unknown as DealCalculationResult;
     expect(result.success).toBe(true);
-    expect(result.dealValue).toBe(375000);
+    expect(result.unitPrice).toBe(UNIT_PRICE);
+    expect(result.dealValue).toBe(937500);
   });
 });
 

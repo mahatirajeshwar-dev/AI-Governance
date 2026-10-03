@@ -15,6 +15,7 @@ import { ProposalState } from "@/lib/governance";
 import { createBlankDeal, type Deal } from "@/lib/deals";
 import { calculateDealTerms, formatINR } from "@/app/api/chat/tools/deal-tools";
 import { formatDisplayTime } from "@/lib/time";
+import { UNIT_PRICE } from "@/lib/pricing";
 
 export function GovernancePanel({
   deal,
@@ -38,7 +39,7 @@ export function GovernancePanel({
       : "DealGuard is evaluating the proposal against delegated decision rights."
     : decision.description;
   const economics = decision.proposalComplete
-    ? calculateDealTerms(displayDeal.quantity!, displayDeal.unitPrice!, displayDeal.proposedDiscount!)
+    ? calculateDealTerms(displayDeal.quantity!, displayDeal.proposedDiscount!)
     : null;
   const listValue = economics?.listValue ?? 0;
   const discountAmount = economics?.discountAmount ?? 0;
@@ -75,7 +76,7 @@ export function GovernancePanel({
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
             <MetricRow label="Quantity" value={`${displayDeal.quantity ?? "—"} licences`} />
-            <MetricRow label="Unit Price" value={formatINR(displayDeal.unitPrice ?? 0)} />
+            <MetricRow label="Unit Price" value={formatINR(UNIT_PRICE)} />
             <MetricRow
               label="Proposed Discount"
               value={formatPercent(displayDeal.proposedDiscount)}

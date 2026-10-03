@@ -6,6 +6,7 @@ import {
 import { ProposalState, getAuthorityBand, getProposalOutcome } from "@/lib/governance";
 import { createDealId, createDealMessage, type DealMessage } from "@/lib/messages";
 import { createEventTimestamp } from "@/lib/time";
+import { UNIT_PRICE } from "@/lib/pricing";
 
 export type DealApprovalState =
   | "PENDING_SALES_MANAGER"
@@ -64,7 +65,7 @@ export function createBlankDeal(id = createDealId("deal")): Deal {
     id,
     customerName: "—",
     quantity: null,
-    unitPrice: null,
+    unitPrice: UNIT_PRICE,
     proposedDiscount: null,
     discountSource: null,
     discountRationale: null,
@@ -164,7 +165,7 @@ export function getDefaultDealAuditTrail(customerName: string, discount: number 
 }
 
 export function createDealSummary(deal: Deal): string {
-  const listValue = (deal.quantity ?? 0) * (deal.unitPrice ?? 0);
+  const listValue = (deal.quantity ?? 0) * UNIT_PRICE;
   const discountAmount = listValue * (((deal.proposedDiscount ?? 0) / 100) || 0);
   const approvalText =
     deal.governanceDecision.authorityStatus === "AUTO_APPROVED"
@@ -179,7 +180,7 @@ export function createDealSummary(deal: Deal): string {
             ? "Policy block"
             : "AI delegated authority";
 
-  return `${deal.customerName}: ${deal.quantity ?? "—"} units at ${formatINR(deal.unitPrice ?? 0)} with ${formatPercent(deal.proposedDiscount)} discount (${formatINR(discountAmount)}). ${deal.governanceDecision.status}. ${approvalText} is the current decision status.`;
+  return `${deal.customerName}: ${deal.quantity ?? "—"} units at ${formatINR(UNIT_PRICE)} with ${formatPercent(deal.proposedDiscount)} discount (${formatINR(discountAmount)}). ${deal.governanceDecision.status}. ${approvalText} is the current decision status.`;
 }
 
 export function createDemoDeals(): Deal[] {
@@ -188,28 +189,28 @@ export function createDemoDeals(): Deal[] {
       id: "deal-infosys",
       customerName: "Infosys",
       quantity: 180,
-      unitPrice: 3200,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 7,
     }),
     buildDealFromProposal({
       id: "deal-reliance",
       customerName: "Reliance Industries",
       quantity: 240,
-      unitPrice: 4400,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 17,
     }),
     buildDealFromProposal({
       id: "deal-tcs",
       customerName: "Tata Consultancy Services",
       quantity: 350,
-      unitPrice: 5100,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 24,
     }),
     buildDealFromProposal({
       id: "deal-hdfc",
       customerName: "HDFC Bank",
       quantity: 120,
-      unitPrice: 6100,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 35,
     }),
   ];
@@ -220,7 +221,7 @@ export function applyProposalToDeal(deal: Deal, updates: Partial<Deal>): Deal {
     ...deal,
     customerName: updates.customerName ?? deal.customerName,
     quantity: updates.quantity ?? deal.quantity,
-    unitPrice: updates.unitPrice ?? deal.unitPrice,
+    unitPrice: UNIT_PRICE,
     proposedDiscount: updates.proposedDiscount ?? deal.proposedDiscount,
     discountSource: updates.discountSource ?? (updates.proposedDiscount != null ? "CUSTOMER_REQUESTED" : deal.discountSource),
     discountRationale: updates.discountRationale ?? (updates.proposedDiscount != null ? null : deal.discountRationale),
@@ -319,6 +320,7 @@ export function detectDiscountRecommendationIntent(input: string): boolean {
 
 export function processCommercialMessage(deal: Deal, input: string): Deal {
   const parsed = parseCommercialRequest(input);
+  const suppliedDifferentPrice = parsed.unitPrice != null && parsed.unitPrice !== UNIT_PRICE;
   const userMessage = createDealMessage({
     dealId: deal.id,
     actor: "user",
@@ -333,7 +335,7 @@ export function processCommercialMessage(deal: Deal, input: string): Deal {
     ...deal,
     customerName: parsed.customerName ?? deal.customerName,
     quantity: parsed.quantity ?? deal.quantity,
-    unitPrice: parsed.unitPrice ?? deal.unitPrice,
+    unitPrice: UNIT_PRICE,
     proposedDiscount: customerSuppliedDiscount ? parsed.proposedDiscount! : replacePriorDiscountWithRecommendation ? null : deal.proposedDiscount,
     discountSource: customerSuppliedDiscount ? "CUSTOMER_REQUESTED" : replacePriorDiscountWithRecommendation ? null : deal.discountSource,
     discountRationale: customerSuppliedDiscount || replacePriorDiscountWithRecommendation ? null : deal.discountRationale,
@@ -362,19 +364,18 @@ export function processCommercialMessage(deal: Deal, input: string): Deal {
     const missing = [
       updated.customerName === "—" ? "customer name" : null,
       updated.quantity === null || !Number.isInteger(updated.quantity) || updated.quantity <= 0 ? "quantity" : null,
-      updated.unitPrice === null ? "unit price" : null,
       !updated.recommendationRequested && updated.proposedDiscount === null ? "requested discount" : null,
     ].filter((field): field is string => field !== null);
-    const question = updated.recommendationRequested && updated.unitPrice === null && updated.quantity !== null
-      ? "What is the unit price per licence?"
-      : missing.length === 2
-        ? `What is the ${missing[0]} and ${missing[1]}?`
-        : `What is the ${missing.join(", ")}?`;
+    const question = missing.length === 2
+      ? `What is the ${missing[0]} and ${missing[1]}?`
+      : `What is the ${missing.join(", ")}?`;
     const followUp = createDealMessage({
       dealId: deal.id,
       actor: "sales-agent",
       role: "assistant",
-      text: question,
+      text: suppliedDifferentPrice
+        ? `The configured licence price is ${formatINR(UNIT_PRICE)}; I’ll use that price. ${question}`
+        : question,
       sequence: updated.messages.length + 1,
     });
     const waitingAudit = updated.auditTrail.some((entry) => entry.message === "Awaiting Sales Agent proposal")
@@ -407,7 +408,8 @@ export function processCommercialMessage(deal: Deal, input: string): Deal {
       "",
       `Customer: ${updated.customerName}`,
       `Quantity: ${updated.quantity} licences`,
-      `Unit Price: ${formatINR(updated.unitPrice ?? 0)}`,
+      ...(suppliedDifferentPrice ? [`Configured unit price: ${formatINR(UNIT_PRICE)}. The requested price will not be used.`] : []),
+      `Unit Price: ${formatINR(UNIT_PRICE)}`,
       `Proposed Discount: ${formatPercent(updated.proposedDiscount)}`,
       `Discount Source: ${updated.discountSource === "AI_RECOMMENDED" ? "AI Recommendation" : "Customer Request"}`,
       "",
@@ -427,7 +429,12 @@ export function processCommercialMessage(deal: Deal, input: string): Deal {
     ...updated,
     workflowPhase: "sales-agent",
     pendingDealGuardMessageId: guardMessage.id,
-    auditTrail: createCompletedAuditTrail(updated),
+    auditTrail: updated.auditTrail.some((entry) => entry.message === "Proposal submitted to DealGuard")
+      ? [
+          ...updated.auditTrail,
+          ...createCompletedAuditTrail(updated).filter((entry) => entry.message !== "New deal started"),
+        ]
+      : createCompletedAuditTrail(updated),
     messages: [...updated.messages, salesMessage, guardMessage],
   };
 }
@@ -477,7 +484,7 @@ export function buildDealFromProposal(partial: Partial<Deal>): Deal {
     ...partial,
     customerName: partial.customerName ?? "—",
     quantity: partial.quantity ?? null,
-    unitPrice: partial.unitPrice ?? null,
+    unitPrice: UNIT_PRICE,
     proposedDiscount: partial.proposedDiscount ?? null,
     discountSource: partial.discountSource ?? (partial.proposedDiscount != null ? "CUSTOMER_REQUESTED" : null),
     discountRationale: partial.discountRationale ?? null,
@@ -524,7 +531,7 @@ export function setDealApproval(deal: Deal, approval: "APPROVED" | "REJECTED"): 
 }
 
 function buildDemoConversation(deal: Deal): DealMessage[] {
-  const userText = `${deal.customerName} wants ${deal.quantity} licences at ₹${deal.unitPrice?.toLocaleString("en-IN")} each and is asking for ${deal.proposedDiscount}% off.`;
+  const userText = `${deal.customerName} wants ${deal.quantity} licences and is asking for ${deal.proposedDiscount}% off.`;
   const assistantText = [
     "Proposed Commercial Action",
     "",
@@ -565,11 +572,15 @@ function extractQuantity(value: string): number | null {
 }
 
 function extractUnitPrice(value: string): number | null {
+  const amount = String.raw`(\d[\d,]*(?:\.\d+)?)`;
+  const currencyPrefix = String.raw`(?:₹|rs\.?|inr)\s*`;
+  const currencySuffix = String.raw`(?:\s*(?:rupees?|rs\.?|bucks))`;
   const patterns = [
-    /^\s*(?:₹|INR)\s*(\d[\d,]*(?:\.\d+)?)\s*(?:each)?[.!?]?\s*$/i,
-    /(?:₹|INR)\s*(\d[\d,]*(?:\.\d+)?)\s*(?:each|per\s+(?:licence|license|seat|user|unit|item)|price)/i,
-    /(?:at|for)\s*(?:₹|INR)?\s*(\d[\d,]*(?:\.\d+)?)\s*(?:each|per\s+(?:licence|license|seat|user|unit|item))/i,
-    /(?:at|for)\s*(?:₹|INR)\s*(\d[\d,]*(?:\.\d+)?)/i,
+    new RegExp(String.raw`^\s*${currencyPrefix}${amount}\s*(?:each)?[.!?]?\s*$`, "i"),
+    new RegExp(String.raw`${currencyPrefix}${amount}\s*(?:each|per\s+(?:licence|license|seat|user|unit|item)|price)`, "i"),
+    new RegExp(String.raw`(?:at|for)\s*(?:₹|rs\.?|inr)?\s*${amount}\s*(?:each|per\s+(?:licence|license|seat|user|unit|item))`, "i"),
+    new RegExp(String.raw`(?:at|for)\s*${currencyPrefix}${amount}`, "i"),
+    new RegExp(String.raw`${amount}${currencySuffix}\s*(?:each|per\s+(?:licence|license|seat|user|unit|item))?`, "i"),
   ];
 
   for (const pattern of patterns) {
@@ -578,6 +589,84 @@ function extractUnitPrice(value: string): number | null {
   }
 
   return null;
+}
+
+export function migrateSavedDeal(deal: Deal): { deal: Deal; migrated: boolean } {
+  const previousPrice = deal.unitPrice;
+  const priceChanged = previousPrice !== UNIT_PRICE;
+  const recalculated = synchronizeDecision({ ...deal, unitPrice: UNIT_PRICE });
+  const auditTrail = [...deal.auditTrail];
+  let migrated = priceChanged;
+
+  if (priceChanged) {
+    auditTrail.push({
+      timestamp: createEventTimestamp(),
+      message: `Migration: unit price changed from ${formatINR(previousPrice ?? 0)} to ${formatINR(UNIT_PRICE)}; commercial values recalculated.`,
+      tone: "dealguard",
+    });
+  }
+
+  if (recalculated.governanceDecision.proposalComplete) {
+    const authorityStatus = recalculated.governanceDecision.authorityStatus;
+    const canPreserveHumanOutcome =
+      authorityStatus !== "BLOCKED" && authorityStatus !== "INVALID_INPUT";
+    if (deal.approvalState === "APPROVED" && canPreserveHumanOutcome) {
+      const isHumanApproval = auditTrail.some((entry) =>
+        entry.message.startsWith("Human approval recorded: proposal authorized")
+      );
+      return {
+        deal: {
+          ...recalculated,
+          approvalState: "APPROVED",
+          proposalState: ProposalState.AUTHORIZED,
+          governanceDecision: {
+            ...recalculated.governanceDecision,
+            status: "AUTHORIZED / RELEASABLE",
+            approvalState: "APPROVED",
+            proposalState: ProposalState.AUTHORIZED,
+            description: isHumanApproval
+              ? "Human approval recorded. The proposal is authorized and releasable."
+              : recalculated.governanceDecision.description,
+          },
+          auditTrail,
+        },
+        migrated,
+      };
+    }
+    if (deal.approvalState === "REJECTED" && canPreserveHumanOutcome) {
+      return {
+        deal: {
+          ...recalculated,
+          approvalState: "REJECTED",
+          proposalState: ProposalState.REJECTED,
+          governanceDecision: {
+            ...recalculated.governanceDecision,
+            status: "REJECTED",
+            approvalState: "REJECTED",
+            proposalState: ProposalState.REJECTED,
+            description: "The proposal was rejected and remains locked.",
+          },
+          auditTrail,
+        },
+        migrated,
+      };
+    }
+    if ((deal.approvalState === "APPROVED" || deal.approvalState === "REJECTED") && !canPreserveHumanOutcome) {
+      auditTrail.push({
+        timestamp: createEventTimestamp(),
+        message: authorityStatus === "BLOCKED"
+          ? "Migration: prior approval outcome is no longer valid because the discount exceeds the policy ceiling; proposal remains blocked."
+          : "Migration: prior approval outcome is no longer valid because the discount is invalid under policy; proposal requires review.",
+        tone: "blocked",
+      });
+      migrated = true;
+    }
+  }
+
+  return {
+    deal: { ...recalculated, auditTrail },
+    migrated,
+  };
 }
 
 function extractDiscount(value: string): number | null {

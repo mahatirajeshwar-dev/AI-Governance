@@ -43,6 +43,8 @@ import {
   loadCompactedSummary,
   saveCompactedSummary,
   loadFeedback,
+  loadDealWorkspace,
+  saveDealWorkspace,
 } from "@/lib/storage";
 import { GovernancePanel } from "@/components/dealguard/governance-panel";
 import {
@@ -74,6 +76,7 @@ export default function Chat() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [deals, setDeals] = useState<Deal[]>(() => createDemoDeals());
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [dealStorageReady, setDealStorageReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showContextMemory, setShowContextMemory] = useState(false);
   const welcomeMessageShownRef = useRef<boolean>(false);
@@ -175,6 +178,23 @@ export default function Chat() {
   useEffect(() => {
     setIsClient(true);
 
+    try {
+      const storedDeals = loadDealWorkspace();
+      if (storedDeals) {
+        setDeals(storedDeals.deals);
+        setSelectedDealId(storedDeals.selectedDealId);
+      } else {
+        const demoDeals = createDemoDeals();
+        setDeals(demoDeals);
+        saveDealWorkspace({ deals: demoDeals, selectedDealId: demoDeals[0]?.id ?? null });
+        setSelectedDealId(demoDeals[0]?.id ?? null);
+      }
+      setDealStorageReady(true);
+    } catch (error) {
+      console.error("Deal workspace restore failed:", error);
+      toast.error("Saved deals could not be restored. Your stored data was left unchanged.");
+    }
+
     // Migrate from old single-chat format if present
     const migratedId = migrateFromLegacyStorage();
 
@@ -212,6 +232,16 @@ export default function Chat() {
       welcomeMessageShownRef.current = true;
     }
   }, []);
+
+  useEffect(() => {
+    if (!dealStorageReady) return;
+    try {
+      saveDealWorkspace({ deals, selectedDealId });
+    } catch (error) {
+      console.error("Deal workspace save failed:", error);
+      toast.error("Deal changes could not be saved to this browser.");
+    }
+  }, [dealStorageReady, deals, selectedDealId]);
 
   const activeDealMessages = selectedDeal?.messages ?? [];
   const visibleDealMessages = activeDealMessages.filter((message) =>
@@ -371,7 +401,6 @@ export default function Chat() {
       (deal) =>
         deal.customerName === "—" &&
         deal.quantity === null &&
-        deal.unitPrice === null &&
         deal.proposedDiscount === null
     );
 

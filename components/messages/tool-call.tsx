@@ -6,6 +6,7 @@ import { Shimmer } from "../ai-elements/shimmer";
 import { useRotatingLabel } from "@/hooks/use-rotating-label";
 import { pickStablePastTense, type FunLabelCategory } from "@/lib/fun-labels";
 import { useMemo } from "react";
+import { UNIT_PRICE } from "@/lib/pricing";
 
 // ---- Tool display config ----
 
@@ -32,10 +33,9 @@ function formatCalculateDealArgs(_: string, input: unknown): string {
     if (typeof input !== "object" || input === null) return "";
     const args = input as Record<string, unknown>;
     const q = args.quantity;
-    const p = args.unitPrice;
     const d = args.requestedDiscountPercent;
-    if (q !== undefined && p !== undefined && d !== undefined) {
-      return `${q} units @ ₹${Number(p).toLocaleString("en-IN")} (${d}% off)`;
+    if (q !== undefined && d !== undefined) {
+      return `${q} units @ ₹${UNIT_PRICE.toLocaleString("en-IN")} (${d}% off)`;
     }
     return "";
   } catch {

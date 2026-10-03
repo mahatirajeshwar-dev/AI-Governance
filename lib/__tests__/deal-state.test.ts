@@ -12,8 +12,10 @@ import {
   setDealWorkflowPhase,
   setDealApproval,
   createDealSummary,
+  migrateSavedDeal,
   type Deal,
 } from "@/lib/deals";
+import { UNIT_PRICE } from "@/lib/pricing";
 
 describe("DealGuard multi-deal workflow", () => {
   it("keeps multiple deals independent", () => {
@@ -31,7 +33,7 @@ describe("DealGuard multi-deal workflow", () => {
     const deal = createBlankDeal();
     expect(deal.customerName).toBe("—");
     expect(deal.quantity).toBeNull();
-    expect(deal.unitPrice).toBeNull();
+    expect(deal.unitPrice).toBe(UNIT_PRICE);
     expect(deal.proposedDiscount).toBeNull();
   });
 
@@ -67,18 +69,19 @@ describe("DealGuard multi-deal workflow", () => {
     expect(parsed.proposedDiscount).toBe(12);
   });
 
-  it("parses bare unit prices and creates a synchronized JSW governance handoff", () => {
-    const parsed = parseCommercialRequest("JSW wants 500 licenses at 100 each for 35% discount");
+  it("enforces the configured price and creates a synchronized JSW governance handoff", () => {
+    const parsed = parseCommercialRequest("JSW wants 500 licenses at Rs. 100 each for 35% discount");
     expect(parsed).toMatchObject({ customerName: "JSW", quantity: 500, unitPrice: 100, proposedDiscount: 35 });
 
-    const deal = processCommercialMessage(createBlankDeal("deal-jsw"), "JSW wants 500 licenses at 100 each for 35% discount");
+    const deal = processCommercialMessage(createBlankDeal("deal-jsw"), "JSW wants 500 licenses at Rs. 100 each for 35% discount");
     expect(deal.governanceDecision).toMatchObject({ proposalComplete: true, status: "BLOCKED", authorityStatus: "BLOCKED", proposalState: ProposalState.BLOCKED });
     expect(deal.approvalState).toBe("BLOCKED");
     expect(deal.workflowPhase).toBe("sales-agent");
     expect(deal.pendingDealGuardMessageId).toBe(deal.messages[2].id);
-    expect(deal.quantity! * deal.unitPrice!).toBe(50000);
-    expect(deal.quantity! * deal.unitPrice! * deal.proposedDiscount! / 100).toBe(17500);
-    expect(deal.quantity! * deal.unitPrice! * (1 - deal.proposedDiscount! / 100)).toBe(32500);
+    expect(deal.unitPrice).toBe(UNIT_PRICE);
+    expect(deal.quantity! * deal.unitPrice!).toBe(1250000);
+    expect(deal.quantity! * deal.unitPrice! * deal.proposedDiscount! / 100).toBe(437500);
+    expect(deal.quantity! * deal.unitPrice! * (1 - deal.proposedDiscount! / 100)).toBe(812500);
     expect(deal.messages.map((message) => message.actor)).toEqual(["user", "sales-agent", "dealguard"]);
     expect(new Set(deal.messages.map((message) => message.id)).size).toBe(3);
     expect(deal.messages.every((message) => message.createdAt && Array.isArray(message.parts))).toBe(true);
@@ -99,36 +102,31 @@ describe("DealGuard multi-deal workflow", () => {
     expect(completed.pendingDealGuardMessageId).toBeNull();
   });
 
-  it("asks for missing terms and completes a proposal from a follow-up message", () => {
+  it("asks only for a missing discount and completes the proposal from a follow-up", () => {
     const first = processCommercialMessage(createBlankDeal("deal-reliance-test"), "Reliance wants 250 licenses");
-    expect(first.messages[1].parts[0]).toMatchObject({ type: "text", text: "What is the unit price and requested discount?" });
+    expect(first.messages[1].parts[0]).toMatchObject({ type: "text", text: "What is the requested discount?" });
     expect(first.governanceDecision.status).toBe("AWAITING PROPOSAL");
     expect(first.workflowPhase).toBe("idle");
 
-    const completed = processCommercialMessage(first, "₹2,000 each and 17% off");
-    expect(completed).toMatchObject({ customerName: "Reliance", quantity: 250, unitPrice: 2000, proposedDiscount: 17 });
+    const completed = processCommercialMessage(first, "17% off");
+    expect(completed).toMatchObject({ customerName: "Reliance", quantity: 250, unitPrice: UNIT_PRICE, proposedDiscount: 17 });
     expect(completed.governanceDecision.status).toBe("SALES MANAGER APPROVAL REQUIRED");
     expect(completed.messages.slice(-2).map((message) => message.actor)).toEqual(["sales-agent", "dealguard"]);
   });
 
-  it("asks only for price when recommendation intent is explicit and resumes it from the follow-up", () => {
+  it("recommends a discount immediately without asking for unit price", () => {
     const first = processCommercialMessage(createBlankDeal("deal-reliance-recommend"), "Reliance wants 500 licences. Recommend a discount.");
-    expect(first.messages.at(-1)?.parts[0]).toMatchObject({ type: "text", text: "What is the unit price per licence?" });
-    expect(first.recommendationRequested).toBe(true);
-    expect(first.proposedDiscount).toBeNull();
-
-    const completed = processCommercialMessage(first, "₹2,000 each.");
-    expect(completed).toMatchObject({
+    expect(first).toMatchObject({
       customerName: "Reliance",
       quantity: 500,
-      unitPrice: 2000,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 12,
       discountSource: "AI_RECOMMENDED",
       recommendationRequested: false,
     });
-    expect(completed.discountRationale).toContain("base 8% + 4 percentage points");
-    expect(completed.governanceDecision.status).toBe("SALES MANAGER APPROVAL REQUIRED");
-    expect(completed.auditTrail.map((entry) => entry.message)).toEqual([
+    expect(first.discountRationale).toContain("base 8% + 4 percentage points");
+    expect(first.governanceDecision.status).toBe("SALES MANAGER APPROVAL REQUIRED");
+    expect(first.auditTrail.map((entry) => entry.message)).toEqual([
       "New deal started",
       "Sales Agent constructed deal context",
       "Sales Agent recommended 12% discount",
@@ -143,7 +141,7 @@ describe("DealGuard multi-deal workflow", () => {
     expect(mahindra.proposedDiscount).toBe(8);
     expect(mahindra.governanceDecision.status).toBe("AUTHORIZED / RELEASABLE");
 
-    const jsw = processCommercialMessage(createBlankDeal("recommend-500"), "JSW wants 500 licences at ₹100 each. Recommend a discount.");
+    const jsw = processCommercialMessage(createBlankDeal("recommend-500"), "JSW wants 500 licences. Recommend a discount.");
     expect(jsw.proposedDiscount).toBe(12);
     expect(jsw.governanceDecision.status).toBe("SALES MANAGER APPROVAL REQUIRED");
     expect(jsw.governanceDecision.proposalState).toBe(ProposalState.HELD);
@@ -154,7 +152,7 @@ describe("DealGuard multi-deal workflow", () => {
     expect(salesText).toContain("Recommended Discount: 12%");
     expect(salesText).toContain("Discount Source: AI Recommendation");
 
-    const tcs = processCommercialMessage(createBlankDeal("recommend-1000"), "TCS wants 1,000 licences at ₹5,000 each. What discount can we offer?");
+    const tcs = processCommercialMessage(createBlankDeal("recommend-1000"), "TCS wants 1,000 licences. What discount can we offer?");
     expect(tcs.proposedDiscount).toBe(15);
     expect(tcs.governanceDecision.status).toBe("SALES MANAGER APPROVAL REQUIRED");
   });
@@ -169,15 +167,36 @@ describe("DealGuard multi-deal workflow", () => {
     const revised = processCommercialMessage(deal, "Recommend a discount.");
     expect(revised).toMatchObject({ proposedDiscount: 12, discountSource: "AI_RECOMMENDED", governanceDecision: { status: "SALES MANAGER APPROVAL REQUIRED" } });
 
-    const normalMissing = processCommercialMessage(createBlankDeal("missing-discount-normal"), "Reliance wants 250 licences at ₹2,000 each.");
+    const normalMissing = processCommercialMessage(createBlankDeal("missing-discount-normal"), "Reliance wants 250 licences.");
     expect(normalMissing.messages.at(-1)?.parts[0]).toMatchObject({ type: "text", text: "What is the requested discount?" });
     expect(normalMissing.proposedDiscount).toBeNull();
 
-    const infosys = processCommercialMessage(createBlankDeal("infosys-customer-7"), "Infosys wants 180 licences at ₹3,200 each for 7% discount.");
-    expect(infosys).toMatchObject({ proposedDiscount: 7, discountSource: "CUSTOMER_REQUESTED", governanceDecision: { status: "AUTHORIZED / RELEASABLE" } });
+    const infosys = processCommercialMessage(createBlankDeal("infosys-customer-7"), "Infosys needs 180 licences with 7% discount.");
+    expect(infosys).toMatchObject({ unitPrice: UNIT_PRICE, proposedDiscount: 7, discountSource: "CUSTOMER_REQUESTED", governanceDecision: { status: "AUTHORIZED / RELEASABLE" } });
 
-    const hdfc = processCommercialMessage(createBlankDeal("hdfc-customer-35"), "HDFC Bank wants 120 licences at ₹6,100 each and wants 35% off.");
-    expect(hdfc).toMatchObject({ proposedDiscount: 35, discountSource: "CUSTOMER_REQUESTED", governanceDecision: { status: "BLOCKED", proposalState: ProposalState.BLOCKED } });
+    const hdfc = processCommercialMessage(createBlankDeal("hdfc-customer-35"), "HDFC wants 120 licences and is asking for 35% off.");
+    expect(hdfc).toMatchObject({ unitPrice: UNIT_PRICE, proposedDiscount: 35, discountSource: "CUSTOMER_REQUESTED", governanceDecision: { status: "BLOCKED", proposalState: ProposalState.BLOCKED } });
+  });
+
+  it("recognizes common rupee expressions and explains when a non-configured price is supplied", () => {
+    for (const [expression, expected] of [
+      ["₹2,500 each", 2500],
+      ["Rs 2500 each", 2500],
+      ["Rs. 2500 per licence", 2500],
+      ["INR 2500 each", 2500],
+      ["2500 rupees each", 2500],
+      ["2500 rs each", 2500],
+      ["2500 bucks each", 2500],
+    ]) {
+      expect(parseCommercialRequest(`JSW wants 500 licences at ${expression} and 12% off`).unitPrice).toBe(expected);
+    }
+
+    const corrected = processCommercialMessage(createBlankDeal("fixed-price-correction"), "JSW wants 500 licences at Rs 3,000 each and 12% off");
+    expect(corrected.unitPrice).toBe(UNIT_PRICE);
+    expect(corrected.messages.at(-2)?.parts[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("The requested price will not be used"),
+    });
   });
 
   it("synchronizes approval and delegated authority outcomes", () => {
@@ -188,10 +207,49 @@ describe("DealGuard multi-deal workflow", () => {
     expect(approved.governanceDecision.status).toBe("AUTHORIZED / RELEASABLE");
     expect(approved.governanceDecision.proposalState).toBe(ProposalState.AUTHORIZED);
     expect(approved.auditTrail.at(-1)?.message).toContain("Human approval recorded");
+    const revised = processCommercialMessage(approved, "Change the discount to 15% off.");
+    expect(revised.approvalState).toBe("PENDING_SALES_MANAGER");
+    expect(revised.auditTrail.some((entry) => entry.message.includes("Human approval recorded"))).toBe(true);
+    expect(revised.auditTrail.at(-1)?.message).toBe("Sales Manager approval required");
 
-    const infosys = processCommercialMessage(createBlankDeal("deal-infosys-test"), "Infosys wants 180 licenses at ₹3,200 each for 7% discount");
+    const infosys = processCommercialMessage(createBlankDeal("deal-infosys-test"), "Infosys wants 180 licenses for 7% discount");
     expect(infosys.governanceDecision.status).toBe("AUTHORIZED / RELEASABLE");
     expect(infosys.governanceDecision.approvalState).toBe("APPROVED");
+  });
+
+  it("migrates saved prices without changing IDs or rewriting history", () => {
+    const originallyApproved = setDealApproval(
+      processCommercialMessage(createBlankDeal("saved-deal-approved"), "Infosys needs 180 licences with 12% discount."),
+      "APPROVED"
+    );
+    const historical = {
+      ...originallyApproved,
+      unitPrice: 3200,
+      messages: originallyApproved.messages.map((message) => ({ ...message })),
+    };
+    const migrated = migrateSavedDeal(historical);
+
+    expect(migrated.migrated).toBe(true);
+    expect(migrated.deal.id).toBe(historical.id);
+    expect(migrated.deal.unitPrice).toBe(UNIT_PRICE);
+    expect(migrated.deal.approvalState).toBe("APPROVED");
+    expect(migrated.deal.messages.map((message) => message.id)).toEqual(
+      historical.messages.map((message) => message.id)
+    );
+    expect(migrated.deal.auditTrail.slice(0, historical.auditTrail.length)).toEqual(historical.auditTrail);
+    expect(migrated.deal.auditTrail.at(-1)?.message).toContain("Migration: unit price changed");
+
+    const previouslyBlockedByHistory = setDealApproval(
+      processCommercialMessage(createBlankDeal("saved-deal-blocked"), "HDFC wants 120 licences and is asking for 35% off."),
+      "APPROVED"
+    );
+    const blockedMigration = migrateSavedDeal({ ...previouslyBlockedByHistory, unitPrice: 4000 });
+    expect(blockedMigration.deal.approvalState).toBe("BLOCKED");
+    expect(blockedMigration.deal.governanceDecision.status).toBe("BLOCKED");
+    expect(blockedMigration.deal.auditTrail).toContainEqual(
+      expect.objectContaining({ message: expect.stringContaining("Human approval recorded") })
+    );
+    expect(blockedMigration.deal.auditTrail.at(-1)?.message).toContain("no longer valid");
   });
 
   it("rejects punctuation-only quick replies such as a lone question mark", () => {
@@ -218,7 +276,7 @@ describe("DealGuard multi-deal workflow", () => {
       id: "d-1",
       customerName: "Larsen & Toubro",
       quantity: 750,
-      unitPrice: 1200,
+      unitPrice: UNIT_PRICE,
       proposedDiscount: 18,
       discountSource: "CUSTOMER_REQUESTED",
       discountRationale: null,
